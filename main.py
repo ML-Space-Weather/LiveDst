@@ -23,7 +23,7 @@ import sklearn
 from sklearn.metrics import make_scorer
 
 from funs import smooth, stretch, est_beta, train_Dst, train_std_GRU
-from funs import train_std, QQ_plot, visualize, storm_sel
+from funs import train_std, QQ_plot, visualize, storm_sel_omni, storm_sel_ACE
 
 from ipdb import set_trace as st
 
@@ -35,7 +35,8 @@ p = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 p.add_argument("-Omni_data", type=str,
-               default='Data/all_20211021-20211111.pkl',
+               default='Data/Omni_data.pkl',
+            #    default='Data/all_20211021-20211111.pkl',
                help='Omni file')
 p.add_argument("-delay", type=int, default=1,
                help='predict hours')
@@ -132,7 +133,8 @@ if width == 0:
     pass
 else:
     # meanwhile, smooth Dst
-    storm_sel(Omni_data, delay, Dst_sel, width, 60) 
+    storm_sel_omni(Omni_data, delay, Dst_sel, width) 
+    # storm_sel_ACE(Omni_data, delay, Dst_sel, width, 60) 
 
 ######################## model Dst ####################
 
@@ -209,9 +211,9 @@ Y = stretch(Y_train, ratio=ratio, thres=Dst_sel)
 # print(X[:, -1, :].max(axis=0))
 # print(Y[:, -1].max())
 
-print(X_test[:3, -1, :].max(axis=0))
-print(Y_test[:10, -1])
-print(Dst_Per_t[:10])
+# print(X_test[:3, -1, :].max(axis=0))
+# print(Y_test[:10, -1])
+# print(Dst_Per_t[:10])
 # Y = Y_train
 # st()
 
@@ -300,8 +302,8 @@ std_Y_per = train_std(x, x_t, y_Per, y_real, delay, Dst_sel,
                     # train=False
                     )
 
-print(std_Y_per.max())
-print(std_Y_per.min())
+# print(std_Y_per.max())
+# print(std_Y_per.min())
 
 # st()
 

@@ -76,7 +76,147 @@ def est_beta(X, y, y_real):
     return RS_min/(RS_min+CRPS_min), CRPS_min, RS_min
 
 
-def storm_sel(Omni_data, delay, Dst_sel, width, num):
+def storm_sel_omni(Omni_data, delay, Dst_sel, width):
+
+    varis = ['N',    
+             'V',    
+             'BX_GSE',
+             'BY_GSE',
+             'BZ_GSE',
+             'F10_INDEX',
+             'DST'
+             ]
+
+    sta = ['HON', 'SJG', 'KAK', 'HER']
+    
+    # Omni read
+    df = pd.read_pickle(Omni_data)
+    Omni_data = df[varis]
+    Omni_date = df.index
+    
+    print(f'Missing value count {Omni_data.isna().sum()}/{len(Omni_data)}')
+
+    # Fill missing values
+    Omni_data.interpolate(inplace=True)
+    Omni_data.interpolate(inplace=True)
+    Omni_data.dropna(inplace=True)
+    
+    print(f'Missing value count {Omni_data.isna().sum()}/{len(Omni_data)}')
+    N = np.array(Omni_data['N'])
+    V = np.array(Omni_data['V'])
+    Bx = np.array(Omni_data['BX_GSE'])
+    By = np.array(Omni_data['BY_GSE'])
+    Bz = np.array(Omni_data['BZ_GSE'])
+    F107 = np.array(Omni_data['F10_INDEX'])
+    F107 = shift(F107, 24, cval=0)
+    Dst = smooth(np.array(Omni_data['DST']), width)
+    # Dst = stretch(Dst, ratio=ratio, width=Dst_sel)
+    B_norm = np.sqrt(Bx**2+By**2+Bz**2)
+    
+    ################# SH variables ###################
+
+    DOY = np.asarray([date.timetuple().tm_yday for date in Omni_date])
+    year = np.asarray([date.year for date in Omni_date])
+    month = np.asarray([date.month for date in Omni_date])
+    dom = np.asarray([date.day for date in Omni_date])
+    UTC = np.asarray([date.hour for date in Omni_date])
+    date_clu = np.vstack([year, month, dom, UTC]).T
+    t_year = 23.4*np.cos((DOY-172)*2*np.pi/365.25)
+    t_day = 11.2*np.cos((UTC-16.72)*2*np.pi/24)
+    t = t_year+t_day
+    theta_c = np.arctan2(By, Bz)
+    SH_vari = np.vstack([
+                         np.sqrt(F107),
+                         t,
+                         np.sin(theta_c),
+    ]).T
+
+    ################## persistence ####################
+
+    Y_Per = shift(Dst, delay, cval=np.NaN)
+    error = np.sqrt(np.nanmean((Y_Per - Dst)**2))
+    # print('RMSE of all persistence model:{}'.format(error))
+
+    ################## NN ##############################
+    X_NN = np.zeros([Dst.shape[0]-6-delay, 13])
+    Y_NN = np.zeros(Dst.shape[0]-6-delay)
+    date_NN = np.zeros([Dst.shape[0]-6-delay, 4])
+
+    for i in tqdm(np.arange(5, Dst.shape[0]-delay-1)):
+
+        X_NN[i-6] = np.hstack((N[i], V[i], B_norm[i], Bz[i],
+                               SH_vari[i],
+                               Dst[i-5:i+1]))
+        Y_NN[i-6] = Dst[i+delay]
+        date_NN[i-6] = date_clu[i+delay+1]
+        
+
+    ################## lstm/1D_CNN ##############################
+    X_DL = np.zeros([Dst.shape[0]-6-delay, 6, 8])
+    Y_DL = np.zeros([Dst.shape[0]-6-delay, 6, 1])
+    Y_Per = np.zeros([Dst.shape[0]-6-delay])
+    date_DL = np.zeros([Dst.shape[0]-6-delay, 4])
+
+    Dst_win = np.zeros([Dst.shape[0], 6])
+    for i in np.arange(6, Dst.shape[0]-delay):
+
+        Dst_win[i-6] = Dst[i-6:i]
+
+    X0 = np.vstack([N, V, B_norm, Bz,
+                    SH_vari.T,
+                    Dst]).T
+    for i in tqdm(np.arange(5, Dst.shape[0]-delay-1)):
+
+        X_DL[i-6] = X0[i-5:i+1]
+        Y_DL[i-6] = np.expand_dims(Dst[i-5+delay:i+delay+1],
+                                    axis=1)
+        Y_Per[i-6] = Dst[i]
+        date_DL[i-6] = date_clu[i+delay+1]
+    
+    peaks, _ = find_peaks(Y_NN*-1,
+                          distance=240,
+                          width=5)
+    peaks = np.hstack((peaks, Y_NN.shape[0]-10))
+
+    idx = np.where(Y_NN[peaks] <= Dst_sel)[0]
+    idx_clu = np.zeros([len(idx), 2])
+
+    with h5py.File('Data/data_'+str(delay)+
+                   '_'+str(Dst_sel)+'.h5', 'w') as f:
+        for i, idx_t in enumerate(idx):
+
+            # print('peak {}:'.format(i), Omni_date[peaks[idx_t]])
+            idx_clu[i, 0] = int(np.where(Y_NN[:peaks[idx_t]] >= 0)[0][-1]-24)
+
+            try:
+                idx_clu[i, 1] = int(np.where(Y_NN[peaks[idx_t]:] >= 0)[0][0]+24+peaks[idx_t])
+            except:
+                idx_clu[i, 1] = Y_NN.shape[0]
+                
+            print('{} & {} & {} & {}'.format(i, 
+                                             Omni_date[int(idx_clu[i, 0])],
+                                             Omni_date[int(idx_clu[i, 1])],
+                                             Y_NN[peaks[idx_t]]))
+
+            f.create_dataset('X_NN_'+str(i),\
+                data=X_NN[int(idx_clu[i, 0]):int(idx_clu[i, 1])])
+            f.create_dataset('Y_NN_'+str(i),\
+                data=np.expand_dims(Y_NN[int(idx_clu[i, 0]):int(idx_clu[i, 1])], axis=1))
+            f.create_dataset('date_NN_'+str(i),\
+                data=date_NN[int(idx_clu[i, 0]):int(idx_clu[i, 1])])
+            f.create_dataset('X_DL_'+str(i),\
+                data=X_DL[int(idx_clu[i, 0]):int(idx_clu[i, 1])])
+            f.create_dataset('Y_DL_'+str(i),\
+                data=Y_DL[int(idx_clu[i, 0]):int(idx_clu[i, 1])])
+            f.create_dataset('Dst_Per'+str(i),\
+                data=Y_Per[int(idx_clu[i, 0]):int(idx_clu[i, 1])])
+            f.create_dataset('date_DL_'+str(i),\
+                data=date_DL[int(idx_clu[i, 0]):int(idx_clu[i, 1])])
+        f.create_dataset('num', data=i)
+    f.close()
+
+
+def storm_sel_ACE(Omni_data, delay, Dst_sel, width, num):
     
     # Omni read
     df = pd.read_pickle(Omni_data)
