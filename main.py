@@ -89,7 +89,10 @@ img_format = 'jpg'
 width = args.smooth_width
 std_method = args.std_method
 DA_method = args.DA_method
-device = torch.device("cuda:"+str(args.device)) 
+if args.device >= 10:
+    device = torch.device("cpu")
+else:
+    device = torch.device("cuda:"+str(args.device)) 
 pred = args.model # not used
 ratio = args.ratio
 Omni_data = args.Omni_data # not used
