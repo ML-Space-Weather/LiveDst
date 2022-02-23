@@ -20,4 +20,4 @@ The data has been downloaded and saved in Data/omni_data.pkl (in case no Interne
 
 ## end-to-end python scripts
 
-    python3 main.py -delay 1 -storm_idx 33 -model GRU -pred_flag -ratio 1.1 -smooth_width 0 -dst_flag -dst_flag -iter_flag -pred_plot -std_method GRU -device 7 -QQplot
+    python3 main.py -delay 1 -storm_idx 33 -model GRU -pred_flag -ratio 1.1 -smooth_width 0 -Dst_flag -iter_flag -pred_plot -std_method GRU -device 7 -QQplot
