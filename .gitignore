@@ -1,0 +1,8 @@
+Data/
+Figs/
+Res/
+__pycache__/
+
+*.pt
+history.json
+*ipynb
