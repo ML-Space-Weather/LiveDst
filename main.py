@@ -93,6 +93,7 @@ if args.device >= 10:
     device = torch.device("cpu")
 else:
     device = torch.device("cuda:"+str(args.device)) 
+print(device)
 pred = args.model # not used
 ratio = args.ratio
 Omni_data = args.Omni_data # not used
