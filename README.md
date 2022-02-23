@@ -2,8 +2,7 @@
 
 ## create folder for generated images and results
 
-    mkdir Figs
-    mkdir Res
+    mkdir Figs Res
 
 ## environment install 
 
