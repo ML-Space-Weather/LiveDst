@@ -1,8 +1,13 @@
 # Tutorial
 
+## create folder for generated images and results
+
+    mkdir Figs
+    mkdir Res
+
 ## environment install 
 
-conda env create -f environment.yml
+    conda env create -f environment.yml
 
 ## Omni data download
 
