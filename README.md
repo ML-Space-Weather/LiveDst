@@ -14,9 +14,9 @@ Then activate LiveDst by
 
 ## Omni data download
 
-    python3 Omni_dataset_generator.py -t0 2000 1 1 -t1 2006 1 1 -filename Data/2000-2006.pkl
+    python3 Omni_dataset_generator.py -t0 2000 1 1 -t1 2022 1 1 -filename Data/Omni_data.pkl
 
-The data has been downloaded and saved in Data/omni_data.pkl (in case no Internet)
+The data has been downloaded and saved in Data/Omni_data.pkl (in case no Internet)
 
 ## end-to-end python scripts
 
