@@ -9,6 +9,7 @@
     conda env create -f environment.yml
     
 Then activate LiveDst by
+
     conda activate LiveDst
 
 ## Omni data download
