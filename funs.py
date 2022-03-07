@@ -359,11 +359,13 @@ def storm_sel_ACE(Omni_data, delay, Dst_sel, width, num):
                 data=date_DL[int(idx_clu[i, 0]):int(idx_clu[i, 1])])
     f.close()
     
-def train_Dst(X, Y, X_t, delay, Dst_sel, train=True):
+def train_Dst(X, Y, X_t, delay, Dst_sel, idx_storm, train=True):
 
     callname = 'Res/params_new_'+\
         str(delay)+'-' +\
-        str(Dst_sel)+'.pt'
+        str(Dst_sel)+'-'+\
+        str(idx_storm)+'-'+\
+        '.pt'
 
     my_callbacks = [Checkpoint(f_params=callname),
                     LRScheduler(WarmRestartLR),
@@ -441,9 +443,9 @@ def train_Dst(X, Y, X_t, delay, Dst_sel, train=True):
 
 
 def train_std(X, X_t, y, y_real, delay, Dst_sel, \
-    idx_storm, device, pred='gru', train=True):
+    idx_storm, device, pred='mlp', train=True):
 
-    callname = 'Res/params_std_new2_'+\
+    callname = 'Res/params_std_'+\
         str(delay)+'-' +\
         str(Dst_sel)+'-'+\
         str(idx_storm)+'-'+\
@@ -467,11 +469,11 @@ def train_std(X, X_t, y, y_real, delay, Dst_sel, \
     beta, CRPS_min, RS_min = est_beta(X, y, y_real)
     # beta, _, _ = est_beta(X, y, y_real)
 
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.plot(y[:100], 'b.-', label='persistence')
-    ax.plot(y_real[:100], 'm.-', label='real')
-    fig.savefig('Figs/test2.jpg')
-    plt.close()
+    # fig, ax = plt.subplots(figsize=(8, 8))
+    # ax.plot(y[:100], 'b.-', label='persistence')
+    # ax.plot(y_real[:100], 'm.-', label='real')
+    # fig.savefig('Figs/test2.jpg')
+    # plt.close()
     
     # y = (y-mean_y)/std_y
     # y_real = (y_real-mean_y)/std_y
@@ -526,7 +528,7 @@ def train_std(X, X_t, y, y_real, delay, Dst_sel, \
 def train_std_GRU(X, X_t, y, y_real, delay, Dst_sel, \
     idx_storm, device, pred='gru', train=True):
 
-    callname = 'Res/params_std_GRU_'+\
+    callname = 'Res/params_std_'+\
         str(delay)+'-' +\
         str(Dst_sel)+'-'+\
         str(idx_storm)+'-'+\
