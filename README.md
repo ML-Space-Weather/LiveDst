@@ -92,8 +92,16 @@ The data has been downloaded and saved in Data/Omni_data.pkl (in case no Interne
 
 ## end-to-end python scripts
 
-    python3 main.py -delay 1 -storm_idx 27 -model GRU -pred_flag -ratio 1.1 -smooth_width 3 -iter_flag -pred_plot -std_method MLP -device 7 -QQplot -Dst_flag -std_flag -DA_method Linear
+    python3 main.py -delay 1 -storm_idx 27 -model GRU -pred_flag -ratio 1.1 -smooth_width 3 -iter_flag -pred_plot -std_method MLP -device 7 -QQplot -boost_num 5 -Dst_flag -std_flag -DA_method Linear
 
 set -device >=10 to use cpu.
+
+## implement boost technique
+
+    python3 main_boost.py -storm_idx 27 -model GRU -ratio 1.0 -smooth_width 0 -iter_flag -pred_plot -std_method GRU -device 1 -QQplot -DA_method Linear -delay 3 -boost_num 5
+
+### try K-fold 
+
+    python3 try_storm_boost.py -model GRU -ratio 1.0 -smooth_width 0 -iter_flag -std_method GRU -device 2 -DA_method Linear -boost_num 1 -length_max 60 -delay_max 6 -QQplot -pred_plot -Dst_flag -std_flag
 
 The results figure can be found as 'Figs/predict_UQ2_'+delay+'--'+Dst_sel+'-'+storm_index+'.jpg'

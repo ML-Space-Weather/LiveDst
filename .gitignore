@@ -2,11 +2,12 @@ Data/*.csv
 Data/all*.pkl
 Figs/*.jpg
 Figs/1.1
-# Res/*.pt
-# Res/*.h5
+*.pt
+Res/*.h5
 __pycache__/
 
-# *.h5
+*.h5
+*.jpg
 # ./*.pt
 history.json
 download.ipynb

@@ -40,6 +40,32 @@ from tqdm import tqdm
 from progressist import ProgressBar as Bar_ori
 from ipdb import set_trace as st
 
+def RMSE_dst(y_pred, y_real):
+
+    idx_strong = np.where(y_real<-100)[0]
+    idx_mild = np.where((y_real<-50) & (y_real>=-100))[0]
+    idx_quiet = np.where(y_real>-50)[0]
+    RMSE = np.sqrt(np.mean((y_pred - y_real)**2))
+    RMSE_strong = np.sqrt(np.mean((y_pred[idx_strong] - y_real[idx_strong])**2))
+    RMSE_mild = np.sqrt(np.mean((y_pred[idx_mild] - y_real[idx_mild])**2))
+    RMSE_quiet = np.sqrt(np.mean((y_pred[idx_quiet] - y_real[idx_quiet])**2))
+
+    RMSE_clu = np.hstack((RMSE, 
+                          RMSE_strong,
+                          RMSE_mild,
+                          RMSE_quiet))
+    
+    print('RMSE is {}'.format(round(RMSE,2)))
+    print('RMSE in strong/mild/quiet is {}/{}/{}'.format(
+        round(RMSE_strong,2),
+        round(RMSE_mild,2),
+        round(RMSE_quiet,2)
+        ))
+    # st()
+
+    # return None
+    return RMSE_clu
+
 class MyBar(Bar_ori):
     template = ('Download |{animation}| {done:B}/{total:B}')
     done_char = '⬛'
@@ -359,9 +385,11 @@ def storm_sel_ACE(Omni_data, delay, Dst_sel, width, num):
                 data=date_DL[int(idx_clu[i, 0]):int(idx_clu[i, 1])])
     f.close()
     
-def train_Dst(X, Y, X_t, delay, Dst_sel, idx_storm, train=True):
+def train_Dst(X, Y, X_t, delay, Dst_sel,
+              idx_storm, train=False):
 
-    callname = 'Res/params_new_'+\
+    callname = 'Res/'+\
+        'params_std_'+\
         str(delay)+'-' +\
         str(Dst_sel)+'-'+\
         str(idx_storm)+'-'+\
@@ -445,7 +473,8 @@ def train_Dst(X, Y, X_t, delay, Dst_sel, idx_storm, train=True):
 def train_std(X, X_t, y, y_real, delay, Dst_sel, \
     idx_storm, device, pred='mlp', train=True):
 
-    callname = 'Res/params_std_'+\
+    callname = 'Res/'+\
+        'params_std_'+\
         str(delay)+'-' +\
         str(Dst_sel)+'-'+\
         str(idx_storm)+'-'+\
@@ -483,7 +512,7 @@ def train_std(X, X_t, y, y_real, delay, Dst_sel, \
     net = MLP(X.shape[1], 0.1)
 
     net.apply(init_weights)
-    print('CRPS_min: {}, RS_min: {}'.format(CRPS_min, RS_min))
+    # print('CRPS_min: {}, RS_min: {}'.format(CRPS_min, RS_min))
 
     net_regr = PhysinformedNet_AR(
         module=net,
@@ -526,9 +555,11 @@ def train_std(X, X_t, y, y_real, delay, Dst_sel, \
 
 
 def train_std_GRU(X, X_t, y, y_real, delay, Dst_sel, \
-    idx_storm, device, pred='gru', train=True):
+    idx_storm, 
+    device, pred='gru', train=True):
 
-    callname = 'Res/params_std_'+\
+    callname = 'Res/'+\
+        'params_std_'+\
         str(delay)+'-' +\
         str(Dst_sel)+'-'+\
         str(idx_storm)+'-'+\
@@ -569,7 +600,7 @@ def train_std_GRU(X, X_t, y, y_real, delay, Dst_sel, \
                    output_size=output_size)
     
     net.apply(init_weights)
-    print('CRPS_min: {}, RS_min: {}'.format(CRPS_min, RS_min))
+    # print('CRPS_min: {}, RS_min: {}'.format(CRPS_min, RS_min))
 
     net_regr = PhysinformedNet_AR_2D(
         module=net,
@@ -647,6 +678,7 @@ def visualize(delay, date_idx, date_clu, y_pred_t,
 
     fig, ax = plt.subplots(figsize=(16, 12))  
     idx = date_idx
+
     print('start date: {}'.format(date_clu[0]))
     print('end date: {}'.format(date_clu[-1]))
 
@@ -693,3 +725,264 @@ def visualize(delay, date_idx, date_clu, y_pred_t,
                     label='GRU_Uncertainty')
     ax.legend()
     fig.savefig(figname, dpi=300)
+
+
+############################################ for boost ######################################
+
+def train_Dst_boost(X, Y, X_t, delay, Dst_sel, ratio,
+              boost_num, idx_storm, train=False):
+
+    callname = 'Res/5/'+\
+        str(ratio)+\
+        '/params_new_'+\
+        str(delay)+'-' +\
+        str(Dst_sel)+'-'+\
+        str(idx_storm)+'-'+\
+        str(boost_num)+'.pt'
+
+    my_callbacks = [Checkpoint(f_params=callname),
+                    LRScheduler(WarmRestartLR),
+                    # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
+                    EarlyStopping(patience=5),
+                    ProgressBar()]
+
+    seed_torch(2333)
+
+    n_epochs = 50000
+    n_iters = 10
+    hidden_size = 32
+    output_size = 1
+    input_size = X.shape[2]
+
+    mean_Y = np.mean(Y)
+    Y_std = np.std(Y)
+
+    # mean_Y = Y.min()
+    # std_Y = Y.max() - Y.min()
+    
+    Y = (Y - mean_Y)/Y_std
+    # Y_t = (Y_t - mean_Y)/Y_std
+
+    mean_X = np.mean(X.reshape(-1, X.shape[2]), axis=0)
+    std_X = np.std(X.reshape(-1, X.shape[2]), axis=0)
+    
+    X = (X - mean_X)/std_X
+    X_t = (X_t - mean_X)/std_X
+
+    # import ipdb;ipdb.set_trace()
+    seed_torch(1029)
+    net = lstm_reg(input_size,
+                   hidden_size,
+                   num_layers=2,
+                   output_size=output_size)
+    '''    
+    net = CNN_1D(num_channel=input_size, out=output_size)
+
+    '''
+    net.apply(init_weights)
+    
+    net_regr = PhysinformedNet(
+        module=net,
+        max_epochs=100,
+        lr=3e-3,
+        train_split = ValidSplit(0.2),
+        batch_size=128,
+        optimizer=torch.optim.AdamW,
+        callbacks=my_callbacks,
+        optimizer__weight_decay=np.exp(-4),
+        # thres=Y_thres,
+        thres=.5,
+        device='cuda',  # uncomment this to train with CUDA
+    )
+
+    X = torch.from_numpy(X).float()
+    Y = torch.from_numpy(Y).float()
+    X_t = torch.from_numpy(X_t).float()
+
+    # net_regr.callbacks = my_callbacks2
+    if train:
+        # y_pred = clf.predict(X_t)
+        net_regr.fit(X, Y)
+        # st()
+        net_regr.load_params(f_params=callname)
+    else:
+        net_regr.initialize()
+        net_regr.load_params(f_params=callname)        
+
+    y_pred_t = net_regr.predict(X_t)#.reshape(-1, 1)
+    y_pred_t = y_pred_t*Y_std+mean_Y
+
+    return y_pred_t
+
+
+def train_std_boost(X, X_t, y, y_real, delay, Dst_sel, \
+    ratio, boost_num, idx_storm, device, pred='mlp', train=True):
+
+    callname = 'Res/5/'+\
+        str(ratio)+\
+        '/params_std_'+\
+        str(delay)+'-' +\
+        str(Dst_sel)+'-'+\
+        str(idx_storm)+'-'+\
+        str(boost_num)+pred+'.pt'
+    
+    my_callbacks_AH = [Checkpoint(f_params=callname),
+                   LRScheduler(WarmRestartLR),
+                   # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
+                   EarlyStopping(patience=5),
+                   ProgressBar()]
+
+    max_X = X.max(axis = 0)
+    min_X = X.min(axis = 0)
+
+    mean_y = y_real.mean()
+    std_y = y_real.std()
+
+    X = (X-min_X)/(max_X-min_X)
+    X_t = (X_t-min_X)/(max_X-min_X)
+    # st()
+    beta, CRPS_min, RS_min = est_beta(X, y, y_real)
+    # beta, _, _ = est_beta(X, y, y_real)
+
+    # fig, ax = plt.subplots(figsize=(8, 8))
+    # ax.plot(y[:100], 'b.-', label='persistence')
+    # ax.plot(y_real[:100], 'm.-', label='real')
+    # fig.savefig('Figs/test2.jpg')
+    # plt.close()
+    
+    # y = (y-mean_y)/std_y
+    # y_real = (y_real-mean_y)/std_y
+    ################# design the model ###################
+
+    seed_torch(1029)
+    net = MLP(X.shape[1], 0.1)
+
+    net.apply(init_weights)
+    # print('CRPS_min: {}, RS_min: {}'.format(CRPS_min, RS_min))
+
+    net_regr = PhysinformedNet_AR(
+        module=net,
+        max_epochs=100,
+        lr=3e-3,
+        train_split = ValidSplit(5),
+        batch_size=128,
+        optimizer=torch.optim.AdamW,
+        callbacks=my_callbacks_AH,
+        optimizer__weight_decay=np.exp(-8),
+        beta = beta,
+        CRPS_min = CRPS_min,
+        RS_min = RS_min,
+        mean = mean_y,
+        std = std_y,
+        # d = d,
+        # device='cuda',  # uncomment this to train with CUDA
+        device=device,  # uncomment this to train with CUDA
+    )
+    X = torch.from_numpy(X).float()
+    X_t = torch.from_numpy(X_t).float()
+    # st()
+    Y = np.vstack([y.T, y_real.T]).T
+    Y = torch.from_numpy(Y).float()
+
+    # import ipdb;ipdb.set_trace()
+    if train:
+        # y_pred = clf.predict(X_t)
+        net_regr.fit(X, Y)
+        # import ipdb;ipdb.set_trace()
+        net_regr.load_params(f_params=callname)
+    else:
+        net_regr.initialize()
+        net_regr.load_params(f_params=callname)  
+
+    std_Y = np.exp(net_regr.predict(X_t).squeeze())
+    # std_Y = np.exp((net_regr.predict(X_t).squeeze()-mean_y)/std_y)
+
+    return std_Y
+
+
+def train_std_GRU_boost(X, X_t, y, y_real, delay, Dst_sel, \
+    ratio, boost_num, idx_storm, 
+    device, pred='gru', train=True):
+
+    callname = 'Res/5/'+\
+        str(ratio)+\
+        '/params_std_'+\
+        str(delay)+'-' +\
+        str(Dst_sel)+'-'+\
+        str(idx_storm)+'-'+\
+        str(boost_num)+pred+'.pt'
+
+    hidden_size = 32
+    output_size = 1
+    input_size = X.shape[2]
+    
+    my_callbacks_AH = [Checkpoint(f_params=callname),
+                   LRScheduler(WarmRestartLR),
+                   # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
+                   EarlyStopping(patience=5),
+                   ProgressBar()]
+
+    max_X = X.max(axis = 0)
+    min_X = X.min(axis = 0)
+
+    mean_y = y_real.mean()
+    std_y = y_real.std()
+
+    mean_X = np.mean(X.reshape(-1, X.shape[2]), axis=0)
+    std_X = np.std(X.reshape(-1, X.shape[2]), axis=0)
+    
+    X = (X - mean_X)/std_X
+    X_t = (X_t - mean_X)/std_X
+
+    # X = (X-min_X)/(max_X-min_X)
+    # X_t = (X_t-min_X)/(max_X-min_X)
+    beta, CRPS_min, RS_min = est_beta(X, y, y_real)
+
+    ################# design the model ###################
+
+    seed_torch(1029)
+    net = lstm_reg(input_size,
+                   hidden_size,
+                   num_layers=2,
+                   output_size=output_size)
+    
+    net.apply(init_weights)
+    # print('CRPS_min: {}, RS_min: {}'.format(CRPS_min, RS_min))
+
+    net_regr = PhysinformedNet_AR_2D(
+        module=net,
+        max_epochs=100,
+        lr=3e-3,
+        train_split = ValidSplit(5),
+        batch_size=128,
+        optimizer=torch.optim.AdamW,
+        callbacks=my_callbacks_AH,
+        optimizer__weight_decay=np.exp(-8),
+        beta = beta,
+        CRPS_min = CRPS_min,
+        RS_min = RS_min,
+        mean = mean_y,
+        std = std_y,
+        # d = d,
+        # device='cuda',  # uncomment this to train with CUDA
+        device=device,  # uncomment this to train with CUDA
+    )
+    X = torch.from_numpy(X).float()
+    X_t = torch.from_numpy(X_t).float()
+    
+    Y = np.stack([y.squeeze(), y_real.squeeze()], axis=-1)
+    Y = torch.from_numpy(Y).float()
+    # st()
+    if train:
+        # y_pred = clf.predict(X_t)
+        net_regr.fit(X, Y)
+        # import ipdb;ipdb.set_trace()
+        net_regr.load_params(f_params=callname)
+    else:
+        net_regr.initialize()
+        net_regr.load_params(f_params=callname)  
+
+    std_Y = np.exp(net_regr.predict(X_t)[:, -1].squeeze())
+    # std_Y = np.exp((net_regr.predict(X_t).squeeze()-mean_y)/std_y)
+
+    return std_Y

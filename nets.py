@@ -749,7 +749,8 @@ class PhysinformedNet_AR(NeuralNetRegressor):
         #         torch.exp(-x[i]**2)/np.sqrt(np.pi)/N)
         # # loss_CB = 
         
-    
+        # beta = RS_min/(RS_min+CRPS_min)
+        # 1-beta = CRPS_min/(RS_min+CRPS_min)
         # loss = self.beta*CRPS+(1-self.beta)*RS
         loss = CRPS/self.CRPS_min+RS/self.RS_min
         loss = torch.mean(loss)

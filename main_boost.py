@@ -1,5 +1,4 @@
 from cProfile import label
-# import imp
 import pandas as pd
 import numpy as np
 import h5py
@@ -7,6 +6,7 @@ from multiprocessing import cpu_count, Pool
 import time
 from tqdm import tqdm
 import datetime as dt
+import os
 
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -25,6 +25,7 @@ from sklearn.metrics import make_scorer
 
 from funs import smooth, stretch, est_beta, train_Dst, train_std_GRU
 from funs import train_std, QQ_plot, visualize, storm_sel_omni, storm_sel_ACE
+from funs import train_Dst_boost, train_std_GRU_boost, train_std_boost
 from funs import RMSE_dst
 
 from ipdb import set_trace as st
@@ -51,6 +52,8 @@ p.add_argument("-smooth_width", type=int, default=0,
                help='width for smooth')
 p.add_argument("-device", type=int, default=0,
                help='which GPU to use')
+p.add_argument("-boost_num", type=int, default=5,
+               help='number of boost iteration')
 p.add_argument('-storm_idx', type=int, nargs='+',
                default=[33],
                help='which storm used for test')
@@ -100,6 +103,7 @@ pred = args.model # not used
 ratio = args.ratio
 Omni_data = args.Omni_data # not used
 vari = args.var_idx
+boost_num = args.boost_num
 
 pred_flag = args.pred_flag
 Dst_model = args.Dst_flag
@@ -108,21 +112,32 @@ iter_mode = args.iter_flag
 qq_plot = args.QQplot
 visual_flag = args.pred_plot
 
-filename_load = 'Res/Uncertainty_'+\
+os.makedirs('Res/'+str(boost_num)+'/'+str(ratio)+'/', exist_ok=True)
+os.makedirs('Figs/'+str(boost_num)+'/'+str(ratio)+'/', exist_ok=True)
+
+filename_load = 'Res/'+str(boost_num)+\
+    '/'+str(ratio)+\
+    '/Uncertainty_'+\
     str(delay-1)+'-' +\
     str(Dst_sel)+'-'+'.h5'
 
-filename_save = 'Res/Uncertainty_'+\
+filename_save = 'Res/'+str(boost_num)+\
+    '/'+str(ratio)+\
+    '/Uncertainty_'+\
     str(delay)+'-' +\
     str(Dst_sel)+'-'+'.h5'
 
-figname_QQ = 'Figs/calibrate_UQ2_'+\
+figname_QQ = 'Figs/'+str(boost_num)+\
+    '/'+str(ratio)+\
+    '/calibrate_boost_'+\
     str(delay)+'-' +\
     str(Dst_sel)+'-'+\
     str(storm_idx[0])+'-'+\
     pred+'.'+img_format 
 
-figname_pred = 'Figs/predict_UQ2_'+\
+figname_pred = 'Figs/'+str(boost_num)+\
+    '/'+str(ratio)+\
+    '/predict_boost_'+\
     str(delay)+'-' +\
     str(Dst_sel)+'-'+\
     str(storm_idx[0])+'.'+img_format  
@@ -237,23 +252,7 @@ else:
 '''
 date_idx = np.arange(6, Y_t.shape[0]-6)
 '''
-# st()
-############################ model 
-y_pred = train_Dst(X, Y, X, delay, Dst_sel, 
-                   storm_idx[0], Dst_model)
-y_pred_t = train_Dst(X, Y, X_t, delay, Dst_sel, 
-                     storm_idx[0], False)
 
-print('max of y_pred_t {}'.format(y_pred_t.max()))
-print('min of y_pred_t {}'.format(y_pred_t.min()))
-
-fig, ax = plt.subplots(figsize=(8, 8))
-ax.plot(y_pred_t[:100, -1].squeeze(), 'b.-', label='GRU')
-ax.plot(Y_t[:100, -1].squeeze(), 'm.-', label='real')
-fig.savefig('Figs/test.jpg')
-plt.close()
-# st()
-######################## model dDst ####################
 
 date_clu = []
 for i, date_tt in tqdm(enumerate(date_test[date_idx])):
@@ -265,52 +264,118 @@ for i, date_tt in tqdm(enumerate(date_test[date_idx])):
                     )
     date_clu.append(t) 
     
+# st()
+
+X_ori = X
+Y_train_ori = Y_train
 y_real = Y_train[:, -1].squeeze()
 y_real_t = Y_t[:, -1].squeeze()
+y_pred = train_Dst(X, Y, X, delay, Dst_sel, 
+                ratio, boost_num, storm_idx[0], Dst_model)
+for iter_boost in range(boost_num):
+    n_sample = X.shape[0]
 
-# preprocess
-y = y_pred[:, -1].squeeze()
-y_t = y_pred_t[:, -1].squeeze()
-x = X[:, -1, :].reshape([X.shape[0], -1]).squeeze()
-x_t = X_t[:, -1, :].reshape([X_t.shape[0], -1]).squeeze()
-# x = X[:, -1, :].squeeze()
-# x_t = X_t[:, -1, :].squeeze()
+    print('boost no. {}'.format(iter_boost+1))
+    print('num of samples left is {}'.format(n_sample))
 
-if pred_flag:
-    x = np.vstack([x.T, y.T-y_real.T]).T
-    x_t = np.vstack([x_t.T, y_t.T-y_real_t.T]).T
+    ############################ model 
+    if iter_boost > 0:
+        y_pred = train_Dst(X[:n_sample//2], Y[:n_sample//2], 
+                        X, delay, Dst_sel, ratio, boost_num, 
+                        storm_idx[0], Dst_model)
+    y_pred_t = train_Dst(X[:n_sample//2], Y[:n_sample//2], 
+                        X_t, delay, Dst_sel, ratio, boost_num, 
+                        storm_idx[0], False)
+    print('\n######### training set ###########')
+    RMSE_dst(y_pred, y_real)
+    print('\n######### test set ###########')
+    RMSE_dst(y_pred_t, y_real_t)
+    print('\n')
+    ######################## model dDst ####################
 
-if std_method == 'MLP':
-    std_Y = train_std(x, x_t, y, y_real, delay, Dst_sel, 
-                    storm_idx[0], device,
-                    pred='gru', 
-                    train=std_model,
-                    #   train=False
-                    )
+    # preprocess
+    y = y_pred[:, -1].squeeze()
+    y_t = y_pred_t[:, -1].squeeze()
+    x = X[:, -1, :].reshape([X.shape[0], -1]).squeeze()
+    x_t = X_t[:, -1, :].reshape([X_t.shape[0], -1]).squeeze()
 
-elif std_method == 'GRU':
-    std_Y = train_std_GRU(X, X_t, y_pred, Y_train, delay, 
-                          Dst_sel, 
-                          storm_idx[0], 
-                          device,
-                          pred='gru', 
-                          train=std_model,
+    if pred_flag:
+        x = np.vstack([x.T, y.T-y_real.T]).T
+        x_t = np.vstack([x_t.T, y_t.T-y_real_t.T]).T
+
+    if std_method == 'MLP':
+        # st()
+        std_Y = train_std(x, x, y, y_real, delay, Dst_sel, 
+                        ratio, boost_num, storm_idx[0], device,
+                        pred='gru', 
+                        train=std_model,
                         #   train=False
-                          )
+                        )
 
-std_Y_per = train_std(x, x_t, y_Per, y_real, delay, Dst_sel, 
-                    storm_idx[0], device, 
-                    pred='per', 
-                    train=std_model,
-                    # train=False
-                    )
+    # st()
+    elif std_method == 'GRU':
+        # st()
+        std_Y = train_std_GRU(X, X, y_pred, Y_train, delay, 
+                            Dst_sel, 
+                            ratio, boost_num, 
+                            storm_idx[0], 
+                            device,
+                            pred='gru', 
+                            train=std_model,
+                            #   train=False
+                            )
 
+    std_Y_sort = np.sort(std_Y)[::-1]
+    idx_sort = np.argsort(std_Y)[::-1]
+    # st()
+    X = X[idx_sort[:n_sample//10*9]]
+    Y = Y[idx_sort[:n_sample//10*9]]
+    y_real = y_real[idx_sort[:n_sample//10*9]]
+    Y_train = Y_train[idx_sort[:n_sample//10*9]]
+
+    # del y_pred
+
+X = X_ori
+Y_train = Y_train_ori
+Y = stretch(Y_train, ratio=ratio, thres=Dst_sel)
+y_real = Y_train[:, -1].squeeze()
+y_pred = train_Dst(X, Y, 
+                X, delay, Dst_sel, ratio, boost_num, 
+                storm_idx[0], Dst_model)
+y = y_pred[:, -1].squeeze()
+x = X[:, -1, :].reshape([X.shape[0], -1]).squeeze()
 print('\n######### training set ###########')
 RMSE_train = RMSE_dst(y_pred, y_real)
 print('\n######### test set ###########')
 RMSE_test = RMSE_dst(y_pred_t, y_real_t)
 print('\n')
 
+# st()
+if std_method == 'MLP':
+    std_Y = train_std(x, x_t, y, y_real, delay, Dst_sel, 
+                    ratio, boost_num, storm_idx[0], device,
+                    pred='gru', 
+                    # train=std_model,
+                    train=False
+                    )
+
+elif std_method == 'GRU':
+    std_Y = train_std_GRU(X, X_t, y_pred, Y_train, delay, 
+                        Dst_sel, 
+                        ratio, boost_num, 
+                        storm_idx[0], 
+                        device,
+                        pred='gru', 
+                        # train=std_model,
+                        train=False
+                        )
+
+std_Y_per = train_std(x, x_t, y_Per, y_real, delay, Dst_sel, 
+                    ratio, boost_num, storm_idx[0], device, 
+                    pred='per', 
+                    train=std_model,
+                    # train=False
+                    )
 if qq_plot:
     QQ_plot(y_real_t, y_t, std_Y, figname_QQ)
 
@@ -328,6 +393,7 @@ if 'Linear' in DA_method:
 
     std_Y_per_train = train_std(x, x, y_Per, y_real, 
                     delay, Dst_sel, 
+                    ratio, boost_num,
                     storm_idx[0], 
                     device,
                     pred='per', 
@@ -335,6 +401,7 @@ if 'Linear' in DA_method:
     if std_method == 'GRU':
         std_Y_train = train_std_GRU(X, X, y_pred, Y_train, delay, 
                             Dst_sel, 
+                            ratio, boost_num, 
                             storm_idx[0], 
                             device,
                             pred='gru', 
@@ -343,6 +410,7 @@ if 'Linear' in DA_method:
                             )
     else:
         std_Y_train = train_std(x, x, y, y_real, delay, Dst_sel, 
+                        ratio, boost_num, 
                         storm_idx[0],
                         device,
                         pred='gru', 
@@ -414,11 +482,10 @@ if 'KF_real' in DA_method:
 
 # print('RMSE of training: {}'.format(np.mean((y-y_real)**2)))
 # print('RMSE of test: {}'.format(np.mean((y_t-y_real_t)**2)))
-print('\n######### KF results ###########')
-RMSE_KF = RMSE_dst(y_t, y_real_t)
-print('\n')
-RMSE_clu = np.stack((RMSE_train, RMSE_test, RMSE_KF))
+RMSE_KF = RMSE_dst(y_pred_t[:, -1].squeeze(), y_real_t)
 
+RMSE_clu = np.stack((RMSE_train, RMSE_test, RMSE_KF))
+print(RMSE_clu.shape)
 with h5py.File(filename_save, 'a') as f:
 
     for w in ['y'+str(storm_idx[0]),
