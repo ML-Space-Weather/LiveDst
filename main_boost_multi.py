@@ -22,6 +22,7 @@ from skorch.callbacks import ProgressBar, Checkpoint
 from skorch.callbacks import EarlyStopping, WarmRestartLR, LRScheduler
 import sklearn
 from sklearn.metrics import make_scorer
+from scipy.ndimage import shift
 
 from funs import smooth, stretch, est_beta, train_Dst, train_std_GRU
 from funs import train_std, QQ_plot, visualize, storm_sel_omni, storm_sel_ACE
@@ -79,6 +80,9 @@ p.add_argument("-Dst_flag", action='store_true',
 p.add_argument("-std_flag", action='store_true',
                help="True: retrain dDst model; \
                    default:use the pre-trained one")
+p.add_argument("-per_flag", action='store_true',
+               help="True: retrain dPer model; \
+                   default:use the pre-trained one")
 p.add_argument("-iter_flag", action='store_true',
                help="True: use historical pred to replace persist; \
                    default:use the persistence model")
@@ -111,6 +115,7 @@ DA_num = args.DA_num
 pred_flag = args.pred_flag
 Dst_model = args.Dst_flag
 std_model = args.std_flag
+per_model = args.per_flag
 iter_mode = args.iter_flag
 qq_plot = args.QQplot
 visual_flag = args.pred_plot
@@ -221,13 +226,24 @@ with h5py.File('Data/data_'+str(delay)+
 
 if (delay > 1) & iter_mode:
     with h5py.File(filename_load, 'r') as f:
+
+        # plt.plot(Dst_Per_t[264:360], 'r.-', label='persistence')
         # st()
         Dst_Per = np.array(f['y'+str(storm_idx[0])]) 
         Dst_Per_t = np.array(f['y_t'+str(storm_idx[0])]) 
+        Dst_Per = shift(Dst_Per, 1, cval=Dst_Per[0])
+        Dst_Per_t = shift(Dst_Per_t, 1, cval=Dst_Per_t[0])
+        # st()
+
+        # plt.plot(Dst_Per_t[264:360], 'b.-', label='KF')
+        # plt.plot(Y_test[264:360:, -1], 'g.-', label='real')
+        # plt.legend()
+        # plt.savefig('per_compare.jpg', dpi=300)
         # std_Per = np.array(f['std'+str(storm_idx[0])]) 
         # std_Per_t = np.array(f['std_t'+str(storm_idx[0])]) 
         f.close()
 
+# st()
 X = X_train
 X[:, :, -6:] = stretch(X[:, :, -6:], ratio=ratio, thres=Dst_sel)
 Y = stretch(Y_train, ratio=ratio, thres=Dst_sel)
@@ -277,14 +293,18 @@ x = X[:, -1, :].reshape([X.shape[0], -1]).squeeze()
 x_t = X_t[:, -1, :].reshape([X_t.shape[0], -1]).squeeze()
 y_pred = train_Dst_boost(X, Y, X, delay, Dst_sel, 
                 ratio, 0, storm_idx[0], Dst_model)
-
-std_Y = train_std_boost(x, x, y_Per, y_real, delay, Dst_sel, 
+y_pred_t = train_Dst_boost(X, Y, X_t, delay, Dst_sel, 
+                ratio, 0, storm_idx[0], Dst_model)
+# st()
+std_Y = train_std_boost(x, x, y_Per, 
+                    y_real, delay, Dst_sel, 
                     ratio, boost_num, storm_idx[0], device, 
                     pred='per', 
-                    train=std_model,
+                    train=per_model,
                     # train=False
                     )
-std_Y_per = train_std_boost(x, x_t, y_Per, y_real, delay, Dst_sel, 
+std_Y_per = train_std_boost(x, x_t, y_Per, 
+                    y_real, delay, Dst_sel, 
                     ratio, boost_num, storm_idx[0], device, 
                     pred='per', 
                     # train=std_model,
@@ -296,21 +316,29 @@ for iter_boost in range(DA_num):
 
     print('boost no. {}'.format(iter_boost+1))
     print('num of samples left is {}'.format(n_sample))
-    std_Y_sort = np.sort(std_Y)[::-1]
-    idx_sort = np.argsort(std_Y)[::-1]
-    # st()
-    X = X[idx_sort[:n_sample//10*9]]
-    Y = Y[idx_sort[:n_sample//10*9]]
-    y_real = y_real[idx_sort[:n_sample//10*9]]
-    Y_train = Y_train[idx_sort[:n_sample//10*9]]
-    ############################ model 
-    # if iter_boost > 0:
-    y_pred = train_Dst_boost(X[:n_sample//2], Y[:n_sample//2], 
-                    X, delay, Dst_sel, ratio, iter_boost, 
-                    storm_idx[0], Dst_model)
-    y_pred_t = train_Dst_boost(X[:n_sample//2], Y[:n_sample//2], 
-                        X_t, delay, Dst_sel, ratio, iter_boost, 
-                        storm_idx[0], False)
+    if iter_boost > 0:
+        # st()
+        num_std = np.abs(y_real-y_pred[:, -1].squeeze())/std_Y
+        # num_std = np.abs(y_real-y_pred[:, -1].squeeze())
+        # num_std = np.abs(y_pred[:, -2].squeeze() - \
+        #     y_pred[:, -1].squeeze())/std_Y
+        # num_std = std_Y
+        std_Y_sort = np.sort(num_std)[::-1]
+        idx_sort = np.argsort(num_std)[::-1]
+        # st()
+        X = X[idx_sort[:n_sample//10*9]]
+        Y = Y[idx_sort[:n_sample//10*9]]
+        y_real = y_real[idx_sort[:n_sample//10*9]]
+        Y_train = Y_train[idx_sort[:n_sample//10*9]]
+        ############################ model 
+        # if iter_boost > 0:
+        y_pred = train_Dst_boost(X[:n_sample//2], Y[:n_sample//2], 
+                        X, delay, Dst_sel, ratio, iter_boost, 
+                        storm_idx[0], Dst_model)
+        y_pred_t = train_Dst_boost(X[:n_sample//2], Y[:n_sample//2], 
+                            X_t, delay, Dst_sel, ratio, iter_boost, 
+                            storm_idx[0], False)
+
     print('\n######### training set ###########')
     RMSE_dst(y_pred, y_real)
     print('\n######### test set ###########')
@@ -331,18 +359,19 @@ for iter_boost in range(DA_num):
     if std_method == 'MLP':
         # st()
         std_Y = train_std_boost(x, x, y, y_real, delay, Dst_sel, 
-                        ratio, iter_boost, storm_idx[0], device,
+                        ratio, iter_boost, boost_num, 
+                        storm_idx[0], device,
                         pred='gru', 
                         train=std_model,
                         #   train=False
                         )
-
     # st()
     elif std_method == 'GRU':
         # st()
         std_Y = train_std_GRU_boost(X, X, y_pred, Y_train, delay, 
                             Dst_sel, 
                             ratio, iter_boost, 
+                            boost_num,
                             storm_idx[0], 
                             device,
                             pred='gru', 
@@ -375,12 +404,14 @@ if qq_plot:
 y_test_clu = []
 name_clu = []
 color_clu = []
+RMSE_opt = []
 
 if 'Linear' in DA_method:
 
     ########################### Linear estimator part 
 
-    std_Y_per_train = train_std_boost(x, x, y_Per, y_real, 
+    std_Y_per_train = train_std_boost(x, x, y_Per, 
+                        y_real, 
                         delay, Dst_sel, 
                         ratio, boost_num,
                         storm_idx[0], 
@@ -392,7 +423,7 @@ if 'Linear' in DA_method:
     std_Y_test_clu = np.expand_dims(std_Y_per, 0)
     y_tr_clu = y_Per
     y_t_clu = y_Per_t
-
+    # st()
     for iter_boost in range(DA_num):
     # for iter_boost in range(boost_num):
 
@@ -411,6 +442,7 @@ if 'Linear' in DA_method:
             std_Y_train = train_std_GRU_boost(X, X, y_pred, Y_train, delay, 
                                 Dst_sel, 
                                 ratio, iter_boost, 
+                                boost_num,
                                 storm_idx[0], 
                                 device,
                                 pred='gru', 
@@ -420,6 +452,7 @@ if 'Linear' in DA_method:
         else:
             std_Y_train = train_std_boost(x, x, y, y_real, delay, Dst_sel, 
                             ratio, iter_boost, 
+                            boost_num,
                             storm_idx[0],
                             device,
                             pred='gru', 
@@ -427,7 +460,9 @@ if 'Linear' in DA_method:
 
         if std_method == 'MLP':
             std_Y = train_std_boost(x, x_t, y, y_real, delay, Dst_sel, 
-                            ratio, iter_boost, storm_idx[0], device,
+                            ratio, iter_boost, 
+                            boost_num,
+                            storm_idx[0], device,
                             pred='gru', 
                             # train=std_model,
                             train=False
@@ -437,6 +472,7 @@ if 'Linear' in DA_method:
             std_Y = train_std_GRU_boost(X, X_t, y_pred, Y_train, delay, 
                                 Dst_sel, 
                                 ratio, iter_boost, 
+                                boost_num,
                                 storm_idx[0], 
                                 device,
                                 pred='gru', 
@@ -463,27 +499,55 @@ if 'Linear' in DA_method:
     # ax[i, 1].set_xlabel('abs(err)')
     # plt.savefig('test.png')
 
-    sigma_train_clu = sigma_train_clu/sigma_train_clu.sum(axis=0)
-    sigma_test_clu = sigma_test_clu/sigma_test_clu.sum(axis=0)
+    # sigma_train_clu = sigma_train_clu/sigma_train_clu.sum(axis=0)
+    # sigma_test_clu = sigma_test_clu/sigma_test_clu.sum(axis=0)
 
+    for tr_num in range(1, DA_num+1):
+        # st()
+        y_tr = sigma_train_clu*y_tr_clu/sigma_train_clu[:tr_num+1].sum(axis=0)
+        y_t = sigma_test_clu*y_t_clu/sigma_test_clu[:tr_num+1].sum(axis=0)
 
-    # st()
-    y_tr = sigma_train_clu*y_tr_clu
-    y_t = sigma_test_clu*y_t_clu
+        y_tr_clu_t = y_tr[:tr_num+1].sum(axis=0)
+        y_t_clu_t = y_t[:tr_num+1].sum(axis=0)
+        RMSE_t = RMSE_dst(y_tr_clu_t, y_real, Print=False)
+        
+        if tr_num == 1:
+            RMSE_opt = RMSE_t[0]
+            y_t_truth = y_t_clu_t
+            y_tr_truth = y_tr_clu_t
+            tr_num_truth = 1
 
-    y_tr = y_tr.sum(axis=0)
-    y_t = y_t.sum(axis=0)
+        elif RMSE_t[0]<RMSE_opt:
+            print('------------update---------------')
+            print('RMSE_train in {} iteration is {}'
+                .format(tr_num, RMSE_t[0]))
+            RMSE_min = RMSE_dst(y_t_clu_t, y_real_t)
+            y_tr_truth = y_tr_clu_t
+            y_t_truth = y_t_clu_t
+            tr_num_truth = tr_num
+            RMSE_opt = RMSE_t[0]
+            # st()
+
+    print('best DA_num is {}, whose RMSE is {}/{}/{}/{}'.format(
+        tr_num_truth, 
+        round(RMSE_min[0], 2),
+        round(RMSE_min[1], 2),
+        round(RMSE_min[2], 2),
+        round(RMSE_min[3], 2),
+    ))
 
     # std_train = 1/(1/sigma_per_train + 1/sigma_GRU_train) # need to modify
     # std_test = 1/(1/sigma_per + 1/sigma_GRU) # need to modify
 
-    y_test_clu.append(y_t)
+    y_test_clu.append(y_t_truth)
     name_clu.append('Linear')
     color_clu.append('g')
 
 # print('RMSE of training: {}'.format(np.mean((y-y_real)**2)))
 # print('RMSE of test: {}'.format(np.mean((y_t-y_real_t)**2)))
-RMSE_KF = RMSE_dst(y_t, y_real_t)
+# st()
+# RMSE_KF = RMSE_dst(y_t, y_real_t)
+RMSE_KF = RMSE_min
 
 RMSE_clu = np.stack((RMSE_train, RMSE_test, RMSE_KF))
 # print(RMSE_clu.shape)
@@ -496,17 +560,18 @@ with h5py.File(filename_save, 'a') as f:
               'y_gru'+str(storm_idx[0]),
               'y_gru_t'+str(storm_idx[0]),
               'RMSE_clu_'+str(storm_idx[0]),
+              'train_idx_'+str(storm_idx[0]),
                 ]:
         if w in f:
             del f[w]
     # st()
     
     f.create_dataset('y'+str(storm_idx[0]),
-                        data = y_tr.squeeze())
+                        data = y_tr_truth.squeeze())
     # f.create_dataset('std'+str(storm_idx[0]),
     #                     data = std_train.squeeze())
     f.create_dataset('y_t'+str(storm_idx[0]),
-                        data = y_t.squeeze())
+                        data = y_t_truth.squeeze())
     # f.create_dataset('std_t'+str(storm_idx[0]),
     #                     data = std_test.squeeze())
     f.create_dataset('y_gru'+str(storm_idx[0]),
@@ -515,6 +580,8 @@ with h5py.File(filename_save, 'a') as f:
                         data = y_pred_t[:, -1].squeeze())
     f.create_dataset('RMSE_clu_'+str(storm_idx[0]),
                         data = RMSE_clu)
+    f.create_dataset('train_idx_'+str(storm_idx[0]),
+                        data = train_idx_clu)
     f.close()
 
 ########################### visualize results ################
