@@ -24,10 +24,11 @@ import sklearn
 from sklearn.metrics import make_scorer
 from scipy.ndimage import shift
 
-from funs import smooth, stretch, est_beta, train_Dst, train_std_GRU
-from funs import train_std, QQ_plot, visualize, storm_sel_omni, storm_sel_ACE
+from funs import smooth, storm_sel_realtime, stretch, est_beta, train_Dst, train_std_GRU
+from funs import train_std, visualize, storm_sel_omni, storm_sel_realtime
 from funs import train_Dst_boost, train_std_GRU_boost, train_std_boost
-from funs import RMSE_dst
+from funs import RMSE_dst, com_plot, visualize_EN, visualize
+from funs import QQ_plot, QQ_plot_clu
 
 from ipdb import set_trace as st
 
@@ -39,13 +40,17 @@ p = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 p.add_argument("-Omni_data", type=str,
-               default='Data/Omni_data.pkl',
-            #    default='Data/all_20211021-20211111.pkl',
+            #    default='Data/Omni_data.pkl',
+               default='Data/all_19990101-20170501.pkl',
+               help='Omni file')
+p.add_argument("-real_data", type=str,
+            #    default='Data/Omni_data.pkl',
+               default='Data/all_20220414-20220417.pkl',
                help='Omni file')
 p.add_argument("-delay", type=int, default=1,
                help='predict hours')
 p.add_argument('-var_idx', nargs='+', type=int,
-               default=[0, 1, 2, 3, 4, 5, 6, 7],
+               default=[0, 1, 2, 3, 4, 5, 6],
                help='Indices of the variables to use')
 p.add_argument("-Dst_sel", type=int, default=-100,
                help='select peak for maximum Dst')
@@ -63,6 +68,9 @@ p.add_argument('-storm_idx', type=int, nargs='+',
 p.add_argument("-model", type=str, default='GRU',
                choices=['GRU', 'KF'],
                help="which model result is used for AR")
+p.add_argument("-boost_method", type=str, default='linear',
+               choices=['linear', 'max'],
+               help="which boost method is used")
 p.add_argument("-std_method", type=str, default='MLP',
                choices=['GRU', 'MLP'],
                help="which method result is used to train std")
@@ -70,10 +78,18 @@ p.add_argument("-DA_method", type=str, nargs='+',
                default=['Linear', 'KF_std', 'KF_real'],
                choices=['Linear', 'KF_std', 'KF_real'],
                help="which data assimilation model is used")
+p.add_argument("-criteria", type=str, 
+               default='resi_std',
+               choices=['resi_std', 'std', 'resi', 'diff_std'],
+               help="which criteria for the boost method;\
+                    resi_std means residuals/std")
 p.add_argument("-pred_flag", action='store_true',
-               help="if add the y_pred-y_real")
+               help="if add the y_pred")
 p.add_argument("-ratio", type=float, default=1.1,
                help='stretch ratio')
+p.add_argument("-real_flag", action='store_true',
+               help="True: predict realtime data; \
+                   default:predict postprocessed data")
 p.add_argument("-Dst_flag", action='store_true',
                help="True: retrain Dst model; \
                    default:use the pre-trained one")
@@ -90,6 +106,9 @@ p.add_argument("-QQplot", action='store_true',
                help="Q-Q plot")
 p.add_argument("-pred_plot", action='store_true',
                help="visualize predictions and DA results")
+p.add_argument("-removal", action='store_true',
+               help="remove the best 10 percent \
+                   during each iteration")
 args = p.parse_args()
 
 ######################## configuration ####################
@@ -100,6 +119,7 @@ img_format = 'jpg'
 width = args.smooth_width
 std_method = args.std_method
 DA_method = args.DA_method
+boost_method = args.boost_method
 if args.device >= 10:
     device = torch.device("cpu")
 else:
@@ -107,11 +127,14 @@ else:
 print(device)
 pred = args.model # not used
 ratio = args.ratio
-Omni_data = args.Omni_data # not used
+Omni_data = args.Omni_data 
+Real_data = args.real_data 
 vari = args.var_idx
 boost_num = args.boost_num
 DA_num = args.DA_num
+criteria = args.criteria
 
+real_flag = args.real_flag
 pred_flag = args.pred_flag
 Dst_model = args.Dst_flag
 std_model = args.std_flag
@@ -119,6 +142,7 @@ per_model = args.per_flag
 iter_mode = args.iter_flag
 qq_plot = args.QQplot
 visual_flag = args.pred_plot
+removal = args.removal
 
 os.makedirs('Res/'+str(boost_num)+'/'+str(ratio)+'/', exist_ok=True)
 os.makedirs('Figs/'+str(boost_num)+'/'+str(ratio)+'/', exist_ok=True)
@@ -150,6 +174,13 @@ figname_pred = 'Figs/'+str(boost_num)+\
     str(Dst_sel)+'-'+\
     str(storm_idx[0])+'.'+img_format  
 
+figname_EN = 'Figs/'+str(boost_num)+\
+    '/'+str(ratio)+\
+    '/predict_ensemble_'+\
+    str(delay)+'-' +\
+    str(Dst_sel)+'-'+\
+    str(storm_idx[0])+'.'+img_format  
+
 font = {'family' : 'serif',
         'weight' : 'normal',
         'size'   : 22}
@@ -165,6 +196,8 @@ else:
     storm_sel_omni(Omni_data, delay, Dst_sel, width) 
     # storm_sel_ACE(Omni_data, delay, Dst_sel, width, 60) 
 
+if args.real_flag:
+    storm_sel_realtime(Real_data, delay, Dst_sel, width)
 ######################## model Dst ####################
 
 test_idx_clu = [0]
@@ -177,6 +210,7 @@ with h5py.File('Data/data_'+str(delay)+
                '_'+str(Dst_sel)+'.h5', 'r') as f:
 
     idx = list(range(np.array(f['num'])))
+    # idx.remove(storm_idx[0])
 
     # print(f.keys())
     print(f['X_DL_{}'.format(idx[0])].shape)
@@ -220,6 +254,21 @@ with h5py.File('Data/data_'+str(delay)+
             np.array(f['Dst_Per{}'.format(storm_idx[i])])
             ])
             
+    test_idx_clu.append(len(Y_test))
+    
+    f.close()
+
+if args.real_flag:
+
+    with h5py.File('Data/realtime_data_'+str(delay)+
+               '_'+str(Dst_sel)+'.h5', 'r') as f:
+
+        # test
+        X_test = np.array(f['X_DL'][:, :, vari])
+        Y_test = np.array(f['Y_DL'])
+        Dst_Per_t = np.array(f['Dst_Per'])
+        date_test = np.array(f['date_DL'])
+                
     test_idx_clu.append(len(Y_test))
     
     f.close()
@@ -316,20 +365,31 @@ for iter_boost in range(DA_num):
 
     print('boost no. {}'.format(iter_boost+1))
     print('num of samples left is {}'.format(n_sample))
-    if iter_boost > 0:
+    if iter_boost >= 0:
         # st()
-        num_std = np.abs(y_real-y_pred[:, -1].squeeze())/std_Y
-        # num_std = np.abs(y_real-y_pred[:, -1].squeeze())
-        # num_std = np.abs(y_pred[:, -2].squeeze() - \
-        #     y_pred[:, -1].squeeze())/std_Y
-        # num_std = std_Y
+        if criteria == 'resi_std':
+            num_std = np.abs(y_real-y_pred[:, -1].squeeze())\
+                /std_Y
+        elif criteria == 'resi':
+            num_std = np.abs(y_real-y_pred[:, -1].squeeze())
+        elif criteria == 'std':
+            num_std = std_Y
+        elif criteria =='diff_std':
+            num_std = np.abs(y_pred[:, -2].squeeze() - \
+                y_pred[:, -1].squeeze())/std_Y
         std_Y_sort = np.sort(num_std)[::-1]
         idx_sort = np.argsort(num_std)[::-1]
         # st()
-        X = X[idx_sort[:n_sample//10*9]]
-        Y = Y[idx_sort[:n_sample//10*9]]
-        y_real = y_real[idx_sort[:n_sample//10*9]]
-        Y_train = Y_train[idx_sort[:n_sample//10*9]]
+        if removal:
+            X = X[idx_sort[:n_sample//10*9]]
+            Y = Y[idx_sort[:n_sample//10*9]]
+            y_real = y_real[idx_sort[:n_sample//10*9]]
+            Y_train = Y_train[idx_sort[:n_sample//10*9]]
+        else:
+            X = X[idx_sort]
+            Y = Y[idx_sort]
+            y_real = y_real[idx_sort]
+            Y_train = Y_train[idx_sort]
         ############################ model 
         # if iter_boost > 0:
         y_pred = train_Dst_boost(X[:n_sample//2], Y[:n_sample//2], 
@@ -353,8 +413,11 @@ for iter_boost in range(DA_num):
     x_t = X_t[:, -1, :].reshape([X_t.shape[0], -1]).squeeze()
 
     if pred_flag:
-        x = np.vstack([x.T, y.T-y_real.T]).T
-        x_t = np.vstack([x_t.T, y_t.T-y_real_t.T]).T
+        
+        yy = Y_train[:, -2].squeeze() - Y_train[:, -1].squeeze()
+        yy_t = Y_t[:, -2].squeeze() - Y_t[:, -1].squeeze()
+        x = np.vstack([x.T, yy.T]).T
+        x_t = np.vstack([x_t.T, yy_t.T]).T
 
     if std_method == 'MLP':
         # st()
@@ -368,7 +431,10 @@ for iter_boost in range(DA_num):
     # st()
     elif std_method == 'GRU':
         # st()
-        std_Y = train_std_GRU_boost(X, X, y_pred, Y_train, delay, 
+        std_Y = train_std_GRU_boost(X, X, 
+                            y_pred, Y_train, 
+                            y_pred_t, Y_test, 
+                            delay, 
                             Dst_sel, 
                             ratio, iter_boost, 
                             boost_num,
@@ -395,9 +461,6 @@ RMSE_test = RMSE_dst(y_pred_t, y_real_t)
 print('\n')
 
 # st()
-
-if qq_plot:
-    QQ_plot(y_real_t, y_t, std_Y, figname_QQ)
 
 ########################### KF part ############################
 
@@ -439,7 +502,8 @@ if 'Linear' in DA_method:
 
 
         if std_method == 'GRU':
-            std_Y_train = train_std_GRU_boost(X, X, y_pred, Y_train, delay, 
+            std_Y_train = train_std_GRU_boost(X, X, y_pred, Y_train, y_pred_t, Y_test,
+                                delay, 
                                 Dst_sel, 
                                 ratio, iter_boost, 
                                 boost_num,
@@ -469,7 +533,9 @@ if 'Linear' in DA_method:
                             )
 
         elif std_method == 'GRU':
-            std_Y = train_std_GRU_boost(X, X_t, y_pred, Y_train, delay, 
+            std_Y = train_std_GRU_boost(X, X_t, y_pred, Y_train, 
+                                y_pred_t, Y_test, 
+                                delay, 
                                 Dst_sel, 
                                 ratio, iter_boost, 
                                 boost_num,
@@ -501,17 +567,37 @@ if 'Linear' in DA_method:
 
     # sigma_train_clu = sigma_train_clu/sigma_train_clu.sum(axis=0)
     # sigma_test_clu = sigma_test_clu/sigma_test_clu.sum(axis=0)
+    com_plot(date_clu, date_idx, 
+             y_t_clu, y_real_t,
+             figname_EN)
+    if qq_plot:
+        QQ_plot_clu(y_real_t, y_t_clu, std_Y_test_clu, 
+                    y_real, y_tr_clu, std_Y_train_clu,
+                    figname_QQ)
 
+    y_t_clu_t = np.zeros(y_t_clu.shape[1])
     for tr_num in range(1, DA_num+1):
         # st()
         y_tr = sigma_train_clu*y_tr_clu/sigma_train_clu[:tr_num+1].sum(axis=0)
-        y_t = sigma_test_clu*y_t_clu/sigma_test_clu[:tr_num+1].sum(axis=0)
+        # y_t = sigma_test_clu*y_t_clu/sigma_test_clu[:tr_num+1].sum(axis=0)
 
         y_tr_clu_t = y_tr[:tr_num+1].sum(axis=0)
-        y_t_clu_t = y_t[:tr_num+1].sum(axis=0)
-        RMSE_t = RMSE_dst(y_tr_clu_t, y_real, Print=False)
+        # y_t_clu_t = y_t[:tr_num+1].sum(axis=0)
+
+        if boost_method == 'max':
+            idx = sigma_test_clu[:tr_num+1].argmin(axis=0)
+            sigma_opt_clu = sigma_test_clu[:tr_num+1].min(axis=0)
+            for i in np.arange(y_t_clu_t.shape[0]):
+                y_t_clu_t[i] = y_t_clu[idx[i], i]
+
+        elif boost_method == 'linear':
+            y_t = sigma_test_clu*y_t_clu/sigma_test_clu[:tr_num+1].sum(axis=0)
+            y_t_clu_t = y_t[:tr_num+1].sum(axis=0)
+
+        RMSE_t = RMSE_dst(y_t_clu_t, y_real_t, Print=False)
         
         if tr_num == 1:
+            RMSE_min = RMSE_dst(y_t_clu_t, y_real_t)
             RMSE_opt = RMSE_t[0]
             y_t_truth = y_t_clu_t
             y_tr_truth = y_tr_clu_t
@@ -586,8 +672,24 @@ with h5py.File(filename_save, 'a') as f:
 
 ########################### visualize results ################
 
+# st()
+idx_plot_clu = []
+for idx in range(y_tr_clu.shape[0]):
+    dd = np.abs(y_real_t[date_idx] - y_tr_clu[idx, date_idx])\
+        /sigma_test_clu[idx, date_idx]
+    idx_sort = np.argsort(dd)[::-1]
+    idx_plot = idx_sort[:len(idx_sort)//2].astype(int)
+    dd_thres = dd[idx_plot[-1]]
+    idx_plot_clu.append(idx_plot)
+
+# st()
 if visual_flag:
-    visualize(delay, date_idx, date_clu, y_pred_t, 
+    visualize_EN(delay, date_idx, date_clu, y_t_clu, 
               y_real_t, y_test_clu, y_Per_t, 
-              std_Y, std_Y_per, name_clu, 
-              color_clu, figname_pred)
+              std_Y_test_clu, std_Y_per, name_clu, 
+              color_clu, figname_pred, idx_plot_clu)
+    
+    # visualize(delay, date_idx, date_clu, y_t_clu, 
+    #           y_real_t, y_test_clu, y_Per_t, 
+    #           std_Y, std_Y_per, name_clu, 
+    #           color_clu, figname_pred, idx_plot)

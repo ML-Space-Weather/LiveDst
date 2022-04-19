@@ -22,6 +22,7 @@ from skorch.callbacks import ProgressBar, Checkpoint
 from skorch.callbacks import EarlyStopping, WarmRestartLR, LRScheduler
 import sklearn
 from sklearn.metrics import make_scorer
+from scipy.ndimage import shift
 
 from funs import smooth, stretch, est_beta, train_Dst, train_std_GRU
 from funs import train_std, QQ_plot, visualize, storm_sel_omni, storm_sel_ACE
@@ -74,6 +75,9 @@ p.add_argument("-Dst_flag", action='store_true',
 p.add_argument("-std_flag", action='store_true',
                help="True: retrain dDst model; \
                    default:use the pre-trained one")
+p.add_argument("-per_flag", action='store_true',
+               help="True: retrain dPer model; \
+                   default:use the pre-trained one")
 p.add_argument("-iter_flag", action='store_true',
                help="True: use historical pred to replace persist; \
                    default:use the persistence model")
@@ -103,6 +107,7 @@ vari = args.var_idx
 
 pred_flag = args.pred_flag
 Dst_model = args.Dst_flag
+per_model = args.per_flag
 std_model = args.std_flag
 iter_mode = args.iter_flag
 qq_plot = args.QQplot
@@ -206,8 +211,8 @@ if (delay > 1) & iter_mode:
         # st()
         Dst_Per = np.array(f['y'+str(storm_idx[0])]) 
         Dst_Per_t = np.array(f['y_t'+str(storm_idx[0])]) 
-        std_Per = np.array(f['std'+str(storm_idx[0])]) 
-        std_Per_t = np.array(f['std_t'+str(storm_idx[0])]) 
+        Dst_Per = shift(Dst_Per, 1, cval=Dst_Per[0])
+        Dst_Per_t = shift(Dst_Per_t, 1, cval=Dst_Per_t[0])
         f.close()
 
 X = X_train
@@ -301,7 +306,7 @@ elif std_method == 'GRU':
 std_Y_per = train_std(x, x_t, y_Per, y_real, delay, Dst_sel, 
                     storm_idx[0], device, 
                     pred='per', 
-                    train=std_model,
+                    train=per_model,
                     # train=False
                     )
 

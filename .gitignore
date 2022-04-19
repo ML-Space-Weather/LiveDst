@@ -12,3 +12,5 @@ __pycache__/
 history.json
 download.ipynb
 test.ipynb
+zenodo/
+.vscode/
