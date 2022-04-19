@@ -93,12 +93,13 @@ name = ['train', 'test', 'KF']
 results_clu = np.zeros([n_len, 2])
 Per_clu = np.zeros([n_len, 2])
 
-for delay in range(0, args.delay_max):
+for delay in range(2, args.delay_max):
     RMSE_clu = np.zeros([3, 4])
 
     for i in tqdm.tqdm(n_combinations):
 
         cmd_share = ['-model {}'.format(args.model),
+                    '-Omni_data {}'.format(args.Omni_data),
                     '-ratio {}'.format(args.ratio),
                     '-smooth_width {}'.format(args.smooth_width),
                     '-DA_method {}'.format(args.DA_method[0]),

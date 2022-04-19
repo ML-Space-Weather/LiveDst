@@ -405,22 +405,22 @@ def storm_sel_realtime(Omni_data, delay, Dst_sel, width):
         print('{} & {} & {} & {}'.format(i, 
                                             Omni_date[0],
                                             Omni_date[-1],
-                                            Y_NN.max()))
+                                            Y_NN.min()))
 
         f.create_dataset('X_NN',\
-            data=X_NN)
+            data=X_NN[:Dst.shape[0]-12])
         f.create_dataset('Y_NN',\
-            data=np.expand_dims(Y_NN, axis=1))
+            data=np.expand_dims(Y_NN[:Dst.shape[0]-12], axis=1))
         f.create_dataset('date_NN',\
             data=date_NN)
         f.create_dataset('X_DL',\
-            data=X_DL)
+            data=X_DL[:Dst.shape[0]-12])
         f.create_dataset('Y_DL',\
-            data=Y_DL)
+            data=Y_DL[:Dst.shape[0]-12])
         f.create_dataset('Dst_Per',\
-            data=Y_Per)
+            data=Y_Per[:Dst.shape[0]-12])
         f.create_dataset('date_DL',\
-            data=date_DL)
+            data=date_DL[:Dst.shape[0]-12])
     f.close()
 
     
@@ -919,7 +919,7 @@ def visualize_EN(delay, date_idx, date_clu, y_pred_t,
                         y_pred_t[i, idx].squeeze()+std_Y_clu[i, idx], 
                         interpolate=True, alpha=.5,
                         label='Uncertainty')
-        ax[i].legend(loc=3, fontsize='xx-small')
+        ax[i].legend(loc=4, fontsize='xx-small')
         if i != len(idx_plot_clu)-1:
             ax[i].get_xaxis().set_visible(False)
     plt.xticks(rotation='vertical')
