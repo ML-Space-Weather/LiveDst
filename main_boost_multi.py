@@ -196,8 +196,8 @@ else:
     storm_sel_omni(Omni_data, delay, Dst_sel, width) 
     # storm_sel_ACE(Omni_data, delay, Dst_sel, width, 60) 
 
-if args.real_flag:
-    storm_sel_realtime(Real_data, delay, Dst_sel, width)
+    if args.real_flag:
+        storm_sel_realtime(Real_data, delay, Dst_sel, width)
 ######################## model Dst ####################
 
 test_idx_clu = [0]
@@ -210,7 +210,7 @@ with h5py.File('Data/data_'+str(delay)+
                '_'+str(Dst_sel)+'.h5', 'r') as f:
 
     idx = list(range(np.array(f['num'])))
-    # idx.remove(storm_idx[0])
+    idx.remove(storm_idx[0])
 
     # print(f.keys())
     print(f['X_DL_{}'.format(idx[0])].shape)
@@ -313,7 +313,7 @@ Y_t = Y_test
 y_Per = stretch(Dst_Per, ratio=ratio, thres=Dst_sel)
 y_Per_t = Dst_Per_t
 
-if storm_idx[0] == 27:
+if storm_idx[0] == 32:
     date_idx = np.arange(264, 360)
 else:
     date_idx = np.arange(6, Y_t.shape[0]-6)

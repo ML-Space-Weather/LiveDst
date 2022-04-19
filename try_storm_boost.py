@@ -56,6 +56,9 @@ p.add_argument("-pred_flag", action='store_true',
                help="if add the y_pred into dDst model")
 p.add_argument("-ratio", type=float, default=1.1,
                help='stretch ratio')
+p.add_argument("-real_flag", action='store_true',
+               help="True: predict realtime data; \
+                   default:predict postprocessed data")
 p.add_argument("-Dst_flag", action='store_true',
                help="True: retrain Dst model; \
                    default:use the pre-trained one")
@@ -125,6 +128,8 @@ for delay in range(0, args.delay_max):
         cmd = ' '.join(cmd_head+cmd_share)
         if args.iter_flag:
             cmd = cmd + ' -iter_flag'
+        if args.real_flag:
+            cmd = cmd + ' -real_flag'
         if args.Dst_flag:
             cmd = cmd + ' -Dst_flag'
         if args.std_flag:
