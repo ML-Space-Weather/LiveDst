@@ -54,7 +54,7 @@ p.add_argument("-real_data", type=str,
 p.add_argument("-delay", type=int, default=1,
                help='predict hours')
 p.add_argument('-var_idx', nargs='+', type=int,
-               default=[0, 1, 2, 3, 4, 5, 6],
+               default=[0, 1, 2, 3],
                help='Indices of the variables to use')
 p.add_argument("-Dst_sel", type=int, default=-100,
                help='select peak for maximum Dst')
