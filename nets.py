@@ -280,6 +280,8 @@ class lstm_reg(torch.nn.Module):
 
     def forward(self,x):
 
+        # check https://meetonfriday.com/posts/d9cbeda0/
+        self.gru1.flatten_parameters() 
         # import ipdb;ipdb.set_trace()
         x, _ = self.gru1(x)
         # x, _ = self.lstm1(x)
@@ -318,14 +320,14 @@ class PhysinformedNet(NeuralNetRegressor):
                           y_true.cuda())**2)
         '''
         # import ipdb;ipdb.set_trace()
+        # st()
 
         loss_CB = my_weight_rmse_CB(y_pred, y_true,
                                     thres=self.thres)
 
-        
         # import ipdb;ipdb.set_trace()
         loss_RMS = torch.mean((y_pred -
-                          y_true.cuda())**2)
+                          y_true.to(self.device))**2)
         # loss_RE = torch.mean((y_pred -
                           # y_true.cuda())**2)
         
@@ -388,8 +390,8 @@ class PhysinformedNet_EN(NeuralNet):
         '''        
        
              
-        loss_ori = self.loss(y_pred=y_pred.type(torch.FloatTensor).cuda(),
-                             y=y_true.type(torch.FloatTensor).cuda(),
+        loss_ori = self.loss(y_pred=y_pred.type(torch.FloatTensor).to(self.device),
+                             y=y_true.type(torch.FloatTensor).to(self.device),
                              pre_weight=self.pre_weight,
                              # alpha=self.alpha,
                              # l1_ratio=self.l1_ratio,
@@ -399,7 +401,7 @@ class PhysinformedNet_EN(NeuralNet):
         
         l1_lambda = self.alpha*self.l1_ratio
         l1_reg = torch.tensor(0.)
-        l1_reg = l1_reg.cuda()
+        l1_reg = l1_reg.to(self.device)
         for param in self.module.parameters():
             l1_reg += torch.sum(torch.abs(param))
         loss1 = l1_lambda * l1_reg
@@ -407,7 +409,7 @@ class PhysinformedNet_EN(NeuralNet):
         
         l2_lambda = self.alpha*(1-self.l1_ratio) 
         l2_reg = torch.tensor(0.)
-        l2_reg = l2_reg.cuda()
+        l2_reg = l2_reg.to(self.device)
         for param in self.module.parameters():
             l2_reg += torch.norm(param).sum()
         loss_ori += l2_lambda * l2_reg
@@ -504,8 +506,8 @@ class PhysinformedNet_single(NeuralNet):
         '''        
         # import ipdb; ipdb.set_trace()
              
-        loss_ori = self.loss(y_pred=y_pred.type(torch.FloatTensor).cuda(),
-                             y=y_true.type(torch.FloatTensor).cuda(),
+        loss_ori = self.loss(y_pred=y_pred.type(torch.FloatTensor).to(self.device),
+                             y=y_true.type(torch.FloatTensor).to(self.device),
                              pre_weight=self.pre_weight,
                              # P = self.P,
                              weight=self.weight)
@@ -711,8 +713,8 @@ class PhysinformedNet_AR(NeuralNetRegressor):
         CRPS = torch.zeros(sigma.shape[0])
         RS = torch.zeros(sigma.shape[0])
         
-        for i in range(N):
-            x[i] = d[i]/np.sqrt(2)/sigma[i]
+        x = d.to(self.device)/sigma
+        x = x/np.sqrt(2)
             
         # import ipdb;ipdb.set_trace()
         

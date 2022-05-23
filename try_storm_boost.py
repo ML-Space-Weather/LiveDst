@@ -15,6 +15,8 @@ p.add_argument("-length_max", type=int, default=60,
                help='how many events')
 p.add_argument("-delay_max", type=int, default=6,
                help='max delay')
+p.add_argument("-delay_min", type=int, default=0,
+               help='min delay')
 
 ########### arguments for Main.py ################
 p.add_argument("-Omni_data", type=str,
@@ -54,12 +56,14 @@ p.add_argument("-criteria", type=str,
                     resi_std means residuals/std")
 p.add_argument("-pred_flag", action='store_true',
                help="if add the y_pred into dDst model")
-p.add_argument("-ratio", type=float, default=1.1,
+p.add_argument("-ratio", type=float, default=1.0,
                help='stretch ratio')
+p.add_argument("-train_per", type=float, default=5,
+               help='How much percentage for training during boost')
 p.add_argument("-real_flag", action='store_true',
                help="True: predict realtime data; \
                    default:predict postprocessed data")
-p.add_argument("-Dst_flag", action='store_true',
+p.add_argument("-dst_flag", action='store_true',
                help="True: retrain Dst model; \
                    default:use the pre-trained one")
 p.add_argument("-std_flag", action='store_true',
@@ -67,6 +71,9 @@ p.add_argument("-std_flag", action='store_true',
                    default:use the pre-trained one")
 p.add_argument("-per_flag", action='store_true',
                help="True: retrain dPer model; \
+                   default:use the pre-trained one")
+p.add_argument("-final_flag", action='store_true',
+               help="True: retrain final std model; \
                    default:use the pre-trained one")
 p.add_argument("-iter_flag", action='store_true',
                help="True: use historical pred to replace persist; \
@@ -93,7 +100,7 @@ name = ['train', 'test', 'KF']
 results_clu = np.zeros([n_len, 2])
 Per_clu = np.zeros([n_len, 2])
 
-for delay in range(2, args.delay_max):
+for delay in range(args.delay_min, args.delay_max):
     RMSE_clu = np.zeros([3, 4])
 
     for i in tqdm.tqdm(n_combinations):
@@ -101,6 +108,7 @@ for delay in range(2, args.delay_max):
         cmd_share = ['-model {}'.format(args.model),
                     '-Omni_data {}'.format(args.Omni_data),
                     '-ratio {}'.format(args.ratio),
+                    '-train_per {}'.format(args.train_per),
                     '-smooth_width {}'.format(args.smooth_width),
                     '-DA_method {}'.format(args.DA_method[0]),
                     '-Dst_sel {}'.format(args.Dst_sel),
@@ -118,7 +126,8 @@ for delay in range(2, args.delay_max):
                 '/'+str(args.ratio)+\
                 '/Uncertainty_'+\
                 str(delay+1)+'-' +\
-                str(args.Dst_sel)+'-'+'.h5'
+                str(args.Dst_sel)+'-'+\
+                args.criteria+'.h5'
         else:
             cmd_head = ['python3 main.py']
             filename = 'Res/'+\
@@ -131,12 +140,14 @@ for delay in range(2, args.delay_max):
             cmd = cmd + ' -iter_flag'
         if args.real_flag:
             cmd = cmd + ' -real_flag'
-        if args.Dst_flag:
-            cmd = cmd + ' -Dst_flag'
+        if args.dst_flag:
+            cmd = cmd + ' -dst_flag'
         if args.std_flag:
             cmd = cmd + ' -std_flag'
         if args.per_flag:
             cmd = cmd + ' -per_flag'
+        if args.final_flag:
+            cmd = cmd + ' -final_flag'
         if args.pred_flag:
             cmd = cmd + ' -pred_flag'
         if args.QQplot:

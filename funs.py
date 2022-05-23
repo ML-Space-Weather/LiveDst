@@ -2,6 +2,13 @@
 from multiprocessing import cpu_count, Pool
 import time
 import datetime as dt
+import os
+import subprocess
+import sys
+if sys.version_info[0] < 3: 
+    from StringIO import StringIO
+else:
+    from io import StringIO
 
 # data format
 import pandas as pd
@@ -12,6 +19,7 @@ from scipy.special import erfinv, erf
 from scipy.signal import savgol_filter
 from scipy.signal import find_peaks
 from scipy.ndimage.interpolation import shift
+from scipy.stats import pearsonr
 
 # visualize
 import matplotlib.pyplot as plt
@@ -21,6 +29,11 @@ import pylab
 # ML
 import torch
 from torch.optim import Adam, AdamW, RMSprop
+import torch.distributed as dist
+from torch.nn.parallel import DataParallel
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.multiprocessing as mp
+
 import sklearn
 from sklearn.metrics import make_scorer
 from sklearn.model_selection import GridSearchCV
@@ -39,6 +52,44 @@ from nets import my_callbacks, seed_torch, maxmin_scale, std_scale
 from tqdm import tqdm
 from progressist import ProgressBar as Bar_ori
 from ipdb import set_trace as st
+
+def get_free_gpu():
+    gpu_stats = subprocess.check_output(["nvidia-smi", "--format=csv", "--query-gpu=memory.used,memory.free"])
+    # st()
+    gpu_df = pd.read_csv(StringIO(u"".join(gpu_stats)),
+                         names=['memory.used', 'memory.free'],
+                         skiprows=1)
+    print('GPU usage:\n{}'.format(gpu_df))
+    gpu_df['memory.free'] = gpu_df['memory.free'].map(lambda x: x.rstrip(' [MiB]'))
+    idx = gpu_df['memory.free'].idxmax()
+    print('Returning GPU{} with {} free MiB'.format(idx, gpu_df.iloc[idx]['memory.free']))
+    return idx
+
+def find_gpus(nums=6):
+    os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp_free_gpus')
+    with open('tmp_free_gpus', 'r') as lines_txt:
+        frees = lines_txt.readlines()
+        idx_freeMemory_pair = [ (idx,int(x.split()[2]))
+                              for idx,x in enumerate(frees) ]
+    
+    idx_freeMemory_pair.sort(key=lambda my_tuple:my_tuple[1],reverse=True)
+    usingGPUs = [str(idx_memory_pair[0])
+                    for idx_memory_pair in idx_freeMemory_pair[:nums] ]
+    usingGPUs =  ','.join(usingGPUs)
+    print('using GPU idx: #', usingGPUs)
+    return usingGPUs
+
+def setup(rank, world_size=3):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # initialize the process group
+    dist.init_process_group("gloo", 
+                            rank=rank, world_size=world_size)
+
+def cleanup():
+    dist.destroy_process_group()
+
 
 def RMSE_dst(y_pred, y_real, Print=True):
 
@@ -106,7 +157,7 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
 
     varis = ['N',    
              'V',    
-             'BX_GSM',
+             'BX_GSE',
              'BY_GSM',
              'BZ_GSM',
              'F10_INDEX',
@@ -115,6 +166,7 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
 
     sta = ['HON', 'SJG', 'KAK', 'HER']
     
+    # st()
     # Omni read
     df = pd.read_pickle(Omni_data)
     Omni_data = df[varis]
@@ -130,14 +182,15 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
     print(f'Missing value count {Omni_data.isna().sum()}/{len(Omni_data)}')
     N = np.array(Omni_data['N'])
     V = np.array(Omni_data['V'])
-    Bx = np.array(Omni_data['BX_GSM'])
+    Bx = np.array(Omni_data['BX_GSE'])
     By = np.array(Omni_data['BY_GSM'])
     Bz = np.array(Omni_data['BZ_GSM'])
     F107 = np.array(Omni_data['F10_INDEX'])
     F107 = shift(F107, 24, cval=0)
     Dst = smooth(np.array(Omni_data['DST']), width)
     # Dst = stretch(Dst, ratio=ratio, width=Dst_sel)
-    B_norm = np.sqrt(Bx**2+By**2+Bz**2)
+    B_norm = np.sqrt(Bx**2+By**2)
+    # B_norm = np.sqrt(Bx**2+By**2+Bz**2)
     
     ################# SH variables ###################
 
@@ -425,7 +478,7 @@ def storm_sel_realtime(Omni_data, delay, Dst_sel, width):
 
     
 def train_Dst(X, Y, X_t, delay, Dst_sel,
-              idx_storm, train=False):
+              idx_storm, device, train=False):
 
     callname = 'Res/'+\
         'params_std_'+\
@@ -437,7 +490,7 @@ def train_Dst(X, Y, X_t, delay, Dst_sel,
     my_callbacks = [Checkpoint(f_params=callname),
                     LRScheduler(WarmRestartLR),
                     # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
-                    EarlyStopping(patience=5),
+                    EarlyStopping(patience=10),
                     ProgressBar()]
 
     seed_torch(2333)
@@ -479,14 +532,15 @@ def train_Dst(X, Y, X_t, delay, Dst_sel,
         module=net,
         max_epochs=100,
         lr=3e-3,
-        train_split = ValidSplit(0.2),
-        batch_size=128,
+        train_split = ValidSplit(5),
+        batch_size=1024,
         optimizer=torch.optim.AdamW,
         callbacks=my_callbacks,
         optimizer__weight_decay=np.exp(-4),
         # thres=Y_thres,
         thres=.5,
-        device='cuda',  # uncomment this to train with CUDA
+        # device='cuda',  # uncomment this to train with CUDA
+        device=device,  # uncomment this to train with CUDA
     )
 
     X = torch.from_numpy(X).float()
@@ -522,7 +576,7 @@ def train_std(X, X_t, y, y_real, delay, Dst_sel, \
     my_callbacks_AH = [Checkpoint(f_params=callname),
                    LRScheduler(WarmRestartLR),
                    # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
-                   EarlyStopping(patience=5),
+                   EarlyStopping(patience=10),
                    ProgressBar()]
 
     max_X = X.max(axis = 0)
@@ -558,7 +612,7 @@ def train_std(X, X_t, y, y_real, delay, Dst_sel, \
         max_epochs=100,
         lr=3e-3,
         train_split = ValidSplit(5),
-        batch_size=128,
+        batch_size=1024,
         optimizer=torch.optim.AdamW,
         callbacks=my_callbacks_AH,
         optimizer__weight_decay=np.exp(-8),
@@ -611,7 +665,7 @@ def train_std_GRU(X, X_t, y, y_real, delay, Dst_sel, \
     my_callbacks_AH = [Checkpoint(f_params=callname),
                    LRScheduler(WarmRestartLR),
                    # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
-                   EarlyStopping(patience=5),
+                   EarlyStopping(patience=10),
                    ProgressBar()]
 
     max_X = X.max(axis = 0)
@@ -646,7 +700,7 @@ def train_std_GRU(X, X_t, y, y_real, delay, Dst_sel, \
         max_epochs=100,
         lr=3e-3,
         train_split = ValidSplit(5),
-        batch_size=128,
+        batch_size=1024,
         optimizer=torch.optim.AdamW,
         callbacks=my_callbacks_AH,
         optimizer__weight_decay=np.exp(-8),
@@ -680,63 +734,131 @@ def train_std_GRU(X, X_t, y, y_real, delay, Dst_sel, \
     return std_Y
 
 
-def QQ_plot(y_real_t, y_t, std_Y, figname):
+def QQ_plot(y_real, y_pred, std_y,
+            y_real_t, y_pred_t, std_y_t, 
+            valid_idx,
+            figname):
 
-    fig, ax = plt.subplots(3, 1, figsize=(10, 16))
-    # import ipdb;ipdb.set_trace()
+    fig, ax = plt.subplots(1, 3, figsize=(24, 8))
 
-    # y_UQ = 
-    Y_temp = (y_real_t.squeeze()-y_t.squeeze())/std_Y/np.sqrt(2)
-    ax[0].hist(Y_temp, 50)
-    # ax[0].set_xlabel('X')
-    ax[0].set_ylabel('Number of samples')
 
-    Y_idx_sort = np.arange(0, 1, 1/Y_temp.shape[0])+1/Y_temp.shape[0]
-    F = (1+erf((y_real_t.squeeze()-y_t.squeeze())/std_Y/np.sqrt(2)))/2
+    y_train = y_real[valid_idx:]
+    y_valid = y_real[:valid_idx]
+
+    #### train 
+
+    y = y_pred[valid_idx:]
+
+    Y_temp = (y_train.squeeze()-y.squeeze())\
+        /std_y[valid_idx:]/np.sqrt(2)
+    # print(valid_idx)
     # st()
-    ax[1].plot(Y_temp, F, '.')
-    ax[1].set_ylabel('F = CDF(X)')
-    # plt.show()
+    Y_idx_sort = np.arange(0, 1, 1/Y_temp.shape[0])+1\
+        /Y_temp.shape[0]
+    F = (1+erf((y_train.squeeze()-y.squeeze())\
+        /std_y[valid_idx:]/np.sqrt(2)))/2
 
-    stats.probplot(F, dist="norm", 
-                      plot=pylab, 
-                    #   ax = ax[2]
-                      )
-    ax[2].set_xlabel('Number of std')
-    ax[2].set_ylabel('CDF(F)')
-    ax[2].set_xlim(-2, 2)
-    ax[2].set_ylim(0, 1)
+    sort_F = np.sort(F)
+    y = np.arange(len(sort_F))/float(len(sort_F))
+    ax[0].plot(sort_F, y)
+    ax[0].plot(y, y)
+    ax[0].set_ylabel('CDF(F)')
+    ax[0].set_xlabel('Normal N(0, 1)')
+
+    #### valid 
+    y = y_pred[:valid_idx]
+
+    Y_temp = (y_valid.squeeze()-y.squeeze())\
+        /std_y[:valid_idx]/np.sqrt(2)
+
+    Y_idx_sort = np.arange(0, 1, 1/Y_temp.shape[0])+1\
+        /Y_temp.shape[0]
+    F = (1+erf((y_valid.squeeze()-y.squeeze())\
+        /std_y[:valid_idx]/np.sqrt(2)))/2
+
+    sort_F = np.sort(F)
+    y = np.arange(len(sort_F))/float(len(sort_F))
+    ax[1].plot(sort_F, y)
+    ax[1].plot(y, y)
+    ax[1].set_xlabel('Normal N(0, 1)')
+
+    #### test 
+
+    Y_temp = (y_real_t.squeeze()-y_pred_t.squeeze())\
+        /std_y_t/np.sqrt(2)
+
+    Y_idx_sort = np.arange(0, 1, 1/Y_temp.shape[0])+1\
+        /Y_temp.shape[0]
+    F = (1+erf((y_real_t.squeeze()-y_pred_t.squeeze())\
+        /std_y_t/np.sqrt(2)))/2
+
+    sort_F = np.sort(F)
+    y = np.arange(len(sort_F))/float(len(sort_F))
+    ax[2].plot(sort_F, y)
+    ax[2].plot(y, y)
+    ax[2].set_xlabel('Normal N(0, 1)')
+
+    ax[0].set_title('train')
+    ax[1].set_title('valid')
+    ax[2].set_title('test')
+
     # plt.show()
     plt.savefig(figname, dpi=300)
 
 
 def QQ_plot_clu(y_real_t, y_t_clu, std_Yt_clu, 
                 y_real, y_clu, std_Y_clu, 
+                valid_idx,
                 figname):
 
-    fig, ax = plt.subplots(y_t_clu.shape[0], 2, figsize=(20, 60))
+    r = np.zeros([y_t_clu.shape[0], 3])
+    fig, ax = plt.subplots(y_t_clu.shape[0], 3, figsize=(20, 60))
+
+    y_train = y_real[valid_idx:]
+    y_valid = y_real[:valid_idx]
 
     for idx, y in enumerate(y_clu):
-        Y_temp = (y_real.squeeze()-y.squeeze())\
-            /std_Y_clu[idx]/np.sqrt(2)
+        y = y[valid_idx:]
+
+        Y_temp = (y_train.squeeze()-y.squeeze())\
+            /std_Y_clu[idx][valid_idx:]/np.sqrt(2)
 
         Y_idx_sort = np.arange(0, 1, 1/Y_temp.shape[0])+1\
             /Y_temp.shape[0]
-        F = (1+erf((y_real.squeeze()-y.squeeze())\
-            /std_Y_clu[idx]/np.sqrt(2)))/2
+        F = (1+erf((y_train.squeeze()-y.squeeze())\
+            /std_Y_clu[idx][valid_idx:]/np.sqrt(2)))/2
 
-        stats.probplot(F, dist="norm", 
-                        plot=ax[idx, 0], 
-                        #   ax = ax[2]
-                        )
+        sort_F = np.sort(F)
+        y = np.arange(len(sort_F))/float(len(sort_F))
+        ax[idx, 0].plot(sort_F, y)
+        ax[idx, 0].plot(y, y)
+
         ax[idx, 0].set_ylabel(str(idx)+':CDF(F)')
         ax[idx, 0].set_xlabel('')
-        ax[idx, 0].set_xlim(-2, 2)
-        ax[idx, 0].set_ylim(0, 1)
-        # ax[idx, 0].get_xaxis().set_visible(False)
         ax[idx, 0].set_title('')
 
     ax[-1, 0].set_xlabel('Number of std')
+
+    for idx, y in enumerate(y_clu):
+        y = y[:valid_idx]
+
+        Y_temp = (y_valid.squeeze()-y.squeeze())\
+            /std_Y_clu[idx][:valid_idx]/np.sqrt(2)
+
+        Y_idx_sort = np.arange(0, 1, 1/Y_temp.shape[0])+1\
+            /Y_temp.shape[0]
+        F = (1+erf((y_valid.squeeze()-y.squeeze())\
+            /std_Y_clu[idx][:valid_idx]/np.sqrt(2)))/2
+
+        sort_F = np.sort(F)
+        y = np.arange(len(sort_F))/float(len(sort_F))
+        ax[idx, 1].plot(sort_F, y)
+        ax[idx, 1].plot(y, y)
+        ax[idx, 1].set_ylabel(str(idx)+':CDF(F)')
+        ax[idx, 1].set_xlabel('')
+        ax[idx, 1].set_title('')
+
+    ax[-1, 1].set_xlabel('Number of std')
 
     for idx, y_t in enumerate(y_t_clu):
         Y_temp = (y_real_t.squeeze()-y_t.squeeze())\
@@ -747,21 +869,19 @@ def QQ_plot_clu(y_real_t, y_t_clu, std_Yt_clu,
         F = (1+erf((y_real_t.squeeze()-y_t.squeeze())\
             /std_Yt_clu[idx]/np.sqrt(2)))/2
 
-        stats.probplot(F, dist="norm", 
-                        plot=ax[idx, 1], 
-                        #   ax = ax[2]
-                        )
-        ax[idx, 1].set_ylabel('')
-        ax[idx, 1].set_xlabel('')
-        ax[idx, 1].set_xlim(-2, 2)
-        ax[idx, 1].set_ylim(0, 1)
-        # ax[idx, 1].get_xaxis().set_visible(False)
-        ax[idx, 1].set_title('')
+        sort_F = np.sort(F)
+        y = np.arange(len(sort_F))/float(len(sort_F))
+        ax[idx, 2].plot(sort_F, y)
+        ax[idx, 2].plot(y, y)
+        ax[idx, 2].set_ylabel('')
+        ax[idx, 2].set_xlabel('')
+        ax[idx, 2].set_title('')
 
-    ax[-1, 1].set_xlabel('Number of std')
+    ax[-1, 2].set_xlabel('Number of std')
 
     ax[0, 0].set_title('train')
-    ax[0, 1].set_title('test')
+    ax[0, 1].set_title('valid')
+    ax[0, 2].set_title('test')
 
     # plt.show()
     plt.savefig(figname, dpi=300)
@@ -850,6 +970,8 @@ def visualize_EN(delay, date_idx, date_clu, y_pred_t,
     print('start date: {}'.format(date_clu[0]))
     print('end date: {}'.format(date_clu[-1]))
 
+    # st()
+
     for i, idx_plot in enumerate(idx_plot_clu):
         date_plot = [date_clu[i] for i in idx_plot]
         # st()
@@ -858,19 +980,20 @@ def visualize_EN(delay, date_idx, date_clu, y_pred_t,
                     'k.-', 
                     label='ensemble_'+str(i))
         
-        # ax[i].plot(date_plot, \
-        #     y_pred_t[i, idx[idx_plot]].squeeze(), \
-        #     'mo', 
-        #     markersize=10,
-        #     label='sample for next model')
+        ax[i].plot(date_plot, \
+            y_pred_t[i, idx[idx_plot]].squeeze(), \
+            'mo', 
+            markersize=10,
+            label='samples for next model')
         # st()
-        ax[i].fill_between(date_clu, 
-            y_pred_t[i, idx].squeeze()-std_Y_clu[i, idx], 
-            y_pred_t[i, idx].squeeze()+std_Y_clu[i, idx], 
-            where=std_Y_clu[i, idx]>np.median(std_Y_clu[i, idx]),
-            interpolate=True, alpha=1,
-            color="m",
-            label='worst half samples')
+        # ax[i].fill_between(date_clu, 
+        #     y_pred_t[i, idx].squeeze()-std_Y_clu[i, idx], 
+        #     y_pred_t[i, idx].squeeze()+std_Y_clu[i, idx], 
+        #     where=std_Y_clu[i, idx]>np.median(std_Y_clu[i, idx]),
+        #     interpolate=True, alpha=1,
+        #     color="m",
+        #     label='worst half samples')
+        
         # st()
         # ax.fill_between(date_plot, 
         #                 y_pred_t[idx[idx_plot]].squeeze()-std_Y[idx[idx_plot]], 
@@ -879,10 +1002,10 @@ def visualize_EN(delay, date_idx, date_clu, y_pred_t,
         #                 label='sample for next model')
         ax[i].plot(date_clu, y_real_t[idx], 
                            'r.-', label='Observation')
-        for n, name in enumerate(name_clu):
-            ax[i].plot(date_clu, y_t[n][idx], 
-                               color_clu[n]+'.-', 
-                               label=name)
+        # for n, name in enumerate(name_clu):
+        #     ax[i].plot(date_clu, y_t[n][idx], 
+        #                        color_clu[n]+'.-', 
+        #                        label=name)
         # if delay == 1:
         #     ax.plot(date_clu, y_Per_t[idx], 'w.-', \
         #         label='persistence')
@@ -945,20 +1068,23 @@ def com_plot(date, date_idx, Dst, real, figname):
 ############################################ for boost ######################################
 
 def train_Dst_boost(X, Y, X_t, delay, Dst_sel, ratio,
-              boost_num, idx_storm, train=False):
+              iter_num, boost_num, idx_storm, device, 
+              criteria,
+              train=False):
 
-    callname = 'Res/5/'+\
+    callname = 'Res/'+str(boost_num)+'/'+\
         str(ratio)+\
         '/params_new_'+\
         str(delay)+'-' +\
         str(Dst_sel)+'-'+\
         str(idx_storm)+'-'+\
-        str(boost_num)+'.pt'
+        str(iter_num)+\
+        criteria+'.pt'
 
     my_callbacks = [Checkpoint(f_params=callname),
                     LRScheduler(WarmRestartLR),
                     # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
-                    EarlyStopping(patience=5),
+                    EarlyStopping(patience=10),
                     ProgressBar()]
 
     seed_torch(2333)
@@ -996,18 +1122,22 @@ def train_Dst_boost(X, Y, X_t, delay, Dst_sel, ratio,
     '''
     net.apply(init_weights)
     
+    # st()
     net_regr = PhysinformedNet(
         module=net,
+        # module=DDP(net),
+        # module=DataParallel(net, device_ids=[0, 1, 2, 3, 4, 5]),
         max_epochs=100,
         lr=3e-3,
-        train_split = ValidSplit(0.2),
-        batch_size=128,
+        train_split = ValidSplit(5),
+        batch_size=1024,
         optimizer=torch.optim.AdamW,
         callbacks=my_callbacks,
         optimizer__weight_decay=np.exp(-4),
         # thres=Y_thres,
         thres=.5,
-        device='cuda',  # uncomment this to train with CUDA
+        device=device,  # uncomment this to train with CUDA
+        # device='cuda',  # uncomment this to train with CUDA
     )
 
     X = torch.from_numpy(X).float()
@@ -1031,8 +1161,10 @@ def train_Dst_boost(X, Y, X_t, delay, Dst_sel, ratio,
 
 
 def train_std_boost(X, X_t, y, y_real, delay, Dst_sel, \
-    ratio, boost_num, idx_storm, device, 
-    pred='mlp', train=True):
+    ratio, iter_num, boost_num, idx_storm, device, 
+    pred, 
+    criteria, 
+    train=True):
 
     callname = 'Res/'+str(boost_num)+'/'+\
         str(ratio)+\
@@ -1040,16 +1172,20 @@ def train_std_boost(X, X_t, y, y_real, delay, Dst_sel, \
         str(delay)+'-' +\
         str(Dst_sel)+'-'+\
         str(idx_storm)+'-'+\
-        str(boost_num)+pred+'.pt'
+        str(iter_num)+pred+\
+        criteria+'.pt'
     
     my_callbacks_AH = [Checkpoint(f_params=callname),
                    LRScheduler(WarmRestartLR),
                    # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
-                   EarlyStopping(patience=5),
+                   EarlyStopping(patience=10),
                    ProgressBar()]
 
     max_X = X.max(axis = 0)
     min_X = X.min(axis = 0)
+
+    if delay == 0:
+        y = smooth(y, width=9)
 
     mean_y = y_real.mean()
     std_y = y_real.std()
@@ -1078,10 +1214,11 @@ def train_std_boost(X, X_t, y, y_real, delay, Dst_sel, \
 
     net_regr = PhysinformedNet_AR(
         module=net,
+        # module=DataParallel(net, device_ids=[0, 1, 2]),
         max_epochs=100,
         lr=3e-3,
         train_split = ValidSplit(5),
-        batch_size=128,
+        batch_size=1024,
         optimizer=torch.optim.AdamW,
         callbacks=my_callbacks_AH,
         optimizer__weight_decay=np.exp(-8),
@@ -1119,7 +1256,9 @@ def train_std_boost(X, X_t, y, y_real, delay, Dst_sel, \
 def train_std_GRU_boost(X, X_t, y, y_real, y_t, y_real_t,\
     delay, Dst_sel, \
     ratio, iter_boost, boost_num, idx_storm, 
-    device, pred='gru', train=True):
+    device, pred, 
+    criteria,
+    train=True):
 
     callname = 'Res/'+str(boost_num)+'/'+\
         str(ratio)+\
@@ -1127,7 +1266,8 @@ def train_std_GRU_boost(X, X_t, y, y_real, y_t, y_real_t,\
         str(delay)+'-' +\
         str(Dst_sel)+'-'+\
         str(idx_storm)+'-'+\
-        str(iter_boost)+pred+'.pt'
+        str(iter_boost)+pred+\
+        criteria+'.pt'
 
     hidden_size = 32
     output_size = 1
@@ -1136,7 +1276,7 @@ def train_std_GRU_boost(X, X_t, y, y_real, y_t, y_real_t,\
     my_callbacks_AH = [Checkpoint(f_params=callname),
                    LRScheduler(WarmRestartLR),
                    # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
-                   EarlyStopping(patience=5),
+                   EarlyStopping(patience=10),
                    ProgressBar()]
 
     max_X = X.max(axis = 0)
@@ -1172,7 +1312,7 @@ def train_std_GRU_boost(X, X_t, y, y_real, y_t, y_real_t,\
         max_epochs=100,
         lr=3e-3,
         train_split = ValidSplit(5),
-        batch_size=128,
+        batch_size=1024,
         optimizer=torch.optim.AdamW,
         callbacks=my_callbacks_AH,
         optimizer__weight_decay=np.exp(-8),
@@ -1204,3 +1344,42 @@ def train_std_GRU_boost(X, X_t, y, y_real, y_t, y_real_t,\
     # std_Y = np.exp((net_regr.predict(X_t).squeeze()-mean_y)/std_y)
 
     return std_Y
+
+
+def GP(X, Y, X_t, Y_t, 
+       device, figname):
+    
+    # initialize likelihood and model
+    likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=Y_t.shape[1]).to(device)
+    # model = MultitaskGPModel(X_t, Y_t, likelihood).to(device)
+    model = MultitaskGPModel(X_t, Y_t[test_idx, :, 0].T, likelihood).to(device)
+    # print(Y_t[test_idx, :, j].shape)
+
+    model.train()
+    likelihood.train()
+
+    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+
+    optimizer = torch.optim.Adam([
+        {'params': model.parameters()},  # Includes GaussianLikelihood parameters
+    ], lr=1e-3)
+
+    # Try to change the number of iterations!
+    training_iter=200  # We need now a larger number of iterations for training
+    # gpytorch.settings.cholesky_jitter.value = 1e-1
+
+    for i in tqdm(range(training_iter)):
+        # for j in range(1):
+        for j in range(Y_t.shape[2]):
+        # for j in range(Y_t.shape[2]):
+            optimizer.zero_grad()
+            # st()
+            output = model(X_t)
+            # print(Y_t[test_idx, :].shape)
+            # print(output)
+            loss = -mll(output, Y_t[test_idx, :, j].T).to(device)
+            # loss = -mll(output, Y_t[test_idx]).to(device)
+            loss.backward()
+            optimizer.step()
+        if i % 10 == 0:
+            print('after {}th iteration, loss is {}'.format(i, loss))
