@@ -187,6 +187,7 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
     Bz = np.array(Omni_data['BZ_GSM'])
     F107 = np.array(Omni_data['F10_INDEX'])
     F107 = shift(F107, 24, cval=0)
+    # Dst = np.array(Omni_data['DST'])
     Dst = smooth(np.array(Omni_data['DST']), width)
     # Dst = stretch(Dst, ratio=ratio, width=Dst_sel)
     B_norm = np.sqrt(Bx**2+By**2)
@@ -1184,6 +1185,7 @@ def train_std_boost(X, X_t, y, y_real, delay, Dst_sel, \
     max_X = X.max(axis = 0)
     min_X = X.min(axis = 0)
 
+    # st()
     if delay == 0:
         y = smooth(y, width=9)
 
