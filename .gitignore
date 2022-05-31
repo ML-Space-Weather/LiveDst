@@ -2,18 +2,18 @@ Data/*.csv
 Data/all*.pkl
 Figs/*.jpg
 Figs/1.1
-*.pt
-# Res/1/*
-# Res/2/*
-# Res/3/*
-# Res/4/*
-# Res/5/*
-# Res/6/*
+# *.pt
+Res/1/*
+Res/2/*
+Res/3/*
+Res/4/*
+Res/5/*
+Res/6/*
 # Res/7/*
-# Res/8/*
-# Res/9/*
-# Res/10/*
-Res/*.h5
+Res/8/*
+Res/9/*
+Res/10/*
+# Res/*.h5
 __pycache__/
 *.h5
 *.jpg
