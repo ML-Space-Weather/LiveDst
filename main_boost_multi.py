@@ -30,7 +30,7 @@ from scipy.ndimage import shift
 from funs import smooth, storm_sel_realtime, stretch, est_beta, train_Dst, train_std_GRU
 from funs import train_std, visualize, storm_sel_omni, storm_sel_realtime
 from funs import train_Dst_boost, train_std_GRU_boost, train_std_boost
-from funs import RMSE_dst, com_plot, visualize_EN, visualize
+from funs import RMSE_dst, com_plot, visualize_EN, visualize, visualize_final
 from funs import QQ_plot, QQ_plot_clu
 from funs import setup
 
@@ -92,7 +92,7 @@ p.add_argument("-pred_flag", action='store_true',
 p.add_argument("-ratio", type=float, default=1.1,
                help='stretch ratio')
 p.add_argument("-train_per", type=float, default=5,
-               help='How much percentage for training during boost')
+               help='How many 10 percentage for training during boost')
 p.add_argument("-real_flag", action='store_true',
                help="True: predict realtime data; \
                    default:predict postprocessed data")
@@ -115,6 +115,8 @@ p.add_argument("-QQplot", action='store_true',
                help="Q-Q plot")
 p.add_argument("-pred_plot", action='store_true',
                help="visualize predictions and DA results")
+p.add_argument("-final_plot", action='store_true',
+               help="visualize final results")
 p.add_argument("-removal", action='store_true',
                help="remove the best 10 percent \
                    during each iteration")
@@ -153,6 +155,7 @@ per_model = args.per_flag
 final_model = args.final_flag
 iter_mode = args.iter_flag
 qq_plot = args.QQplot
+visual_final = args.final_plot
 visual_flag = args.pred_plot
 removal = args.removal
 
@@ -198,7 +201,16 @@ figname_pred = 'Figs/'+str(boost_num)+\
     str(Dst_sel)+'-'+\
     str(storm_idx[0])+\
     criteria+\
-    '.'+img_format+'.'+img_format  
+    '.'+img_format  
+
+figname_final = 'Figs/'+str(boost_num)+\
+    '/'+str(ratio)+\
+    '/predict_final_'+\
+    str(delay)+'-' +\
+    str(Dst_sel)+'-'+\
+    str(storm_idx[0])+\
+    criteria+\
+    '.'+img_format 
 
 figname_EN = 'Figs/'+str(boost_num)+\
     '/'+str(ratio)+\
@@ -238,7 +250,7 @@ with h5py.File('Data/data_'+str(delay)+
                '_'+str(Dst_sel)+'.h5', 'r') as f:
 
     idx = np.arange(np.array(f['num']))
-    shuffle(idx) # shuffle storm events
+    # shuffle(idx) # shuffle storm events
     idx = list(idx)
     # idx.remove(storm_idx[0])
 
@@ -309,8 +321,8 @@ if (delay > 1) & iter_mode:
 
         # plt.plot(Dst_Per_t[264:360], 'r.-', label='persistence')
         # st()
-        Dst_Per = np.array(f['y'+str(storm_idx[0])]) 
-        Dst_Per_t = np.array(f['y_t'+str(storm_idx[0])]) 
+        Dst_Per = np.array(f['y_final'+str(storm_idx[0])]) 
+        Dst_Per_t = np.array(f['y_final_t'+str(storm_idx[0])]) 
         Dst_Per = shift(Dst_Per, 1, cval=Dst_Per[0])
         Dst_Per_t = shift(Dst_Per_t, 1, cval=Dst_Per_t[0])
         # st()
@@ -344,7 +356,7 @@ Y_t = Y_test
 y_Per = stretch(Dst_Per, ratio=ratio, thres=Dst_sel)
 y_Per_t = Dst_Per_t
 
-if (storm_idx[0] == 2) & (real_flag==0):
+if (storm_idx[0] == 27) & (real_flag==0):
     date_idx = np.arange(264, 360)
 else:
     date_idx = np.arange(6, Y_t.shape[0]-6)
@@ -402,6 +414,7 @@ std_Y_per = train_std_boost(x, x_t, y_Per,
                     train=False
                     )
 
+# st()
 y_pred_save, y_pred_t_save, std_Y_save, std_Y_per_save = \
     y_pred, y_pred_t, std_Y, std_Y_per
 for iter_boost in range(DA_num):
@@ -438,14 +451,16 @@ for iter_boost in range(DA_num):
         ############################ model 
         # if iter_boost > 0:
         # st()
-        y_pred = train_Dst_boost(X[:int(n_sample*train_per)//10], Y[:int(n_sample*train_per)//10], 
+        y_pred = train_Dst_boost(X[:int(n_sample*train_per)//10], 
+                        Y[:int(n_sample*train_per)//10], 
                         X, delay, Dst_sel, ratio, 
                         iter_boost, boost_num,
                         storm_idx[0], 
                         device, 
                         criteria,
                         Dst_model)
-        y_pred_t = train_Dst_boost(X[:int(n_sample*train_per)//10], Y[:int(n_sample*train_per)//10], 
+        y_pred_t = train_Dst_boost(X[:int(n_sample*train_per)//10], 
+                            Y[:int(n_sample*train_per)//10], 
                             X_t, delay, Dst_sel, ratio, 
                             iter_boost, boost_num, 
                             storm_idx[0], 
@@ -577,7 +592,9 @@ for iter_boost in range(DA_num):
 
 
     if std_method == 'GRU':
-        std_Y_train = train_std_GRU_boost(X, X, y_pred, Y_train, y_pred_t, Y_test,
+        std_Y_train = train_std_GRU_boost(X, X, 
+                            y_pred, Y_train, 
+                            y_pred_t, Y_test,
                             delay, 
                             Dst_sel, 
                             ratio, 
@@ -591,7 +608,8 @@ for iter_boost in range(DA_num):
                             #   train=False
                             )
 
-        std_Y = train_std_GRU_boost(X, X_t, y_pred, Y_train, 
+        std_Y = train_std_GRU_boost(X, X_t, 
+                            y_pred, Y_train, 
                             y_pred_t, Y_test, 
                             delay, 
                             Dst_sel, 
@@ -732,6 +750,13 @@ std_test_final = train_std_boost(x_ori, x_t, y_tr_truth,
                     criteria=criteria,
                     train=False)
 
+y_tr_clu = np.vstack([y_tr_clu, 
+                        np.expand_dims(y_tr_truth, 0)])
+y_t_clu = np.vstack([y_t_clu, np.expand_dims(y_t_truth, 0)])
+std_Y_train_clu = np.vstack([std_Y_train_clu, 
+                                np.expand_dims(std_train_final, 0)])
+std_Y_test_clu = np.vstack([std_Y_test_clu, 
+                                np.expand_dims(std_test_final, 0)])
 
 # std_train = 1/(1/sigma_per_train + 1/sigma_GRU_train) # need to modify
 # std_test = 1/(1/sigma_per + 1/sigma_GRU) # need to modify
@@ -800,7 +825,7 @@ with h5py.File(filename_save, 'a') as f:
 
 # st()
 idx_plot_clu = []
-for idx in range(y_tr_clu.shape[0]):
+for idx in range(y_tr_clu.shape[0]-1):
     dd = np.abs(y_real_t[date_idx] - y_tr_clu[idx, date_idx])\
         /sigma_test_clu[idx, date_idx]
     idx_sort = np.argsort(dd)[::-1]
@@ -814,8 +839,9 @@ if visual_flag:
               y_real_t, y_test_clu, y_Per_t, 
               std_Y_test_clu, std_Y_per, name_clu, 
               color_clu, figname_pred, idx_plot_clu)
-    
-    # visualize(delay, date_idx, date_clu, y_t_clu, 
-    #           y_real_t, y_test_clu, y_Per_t, 
-    #           std_Y, std_Y_per, name_clu, 
-    #           color_clu, figname_pred, idx_plot)
+# st()
+if visual_final:
+    visualize_final(delay, date_idx, date_clu, 
+              y_t_truth, y_real_t, y_pred_t_save[:, -1].squeeze(),
+              std_test_final, name_clu, 
+              color_clu, figname_final, idx_plot)

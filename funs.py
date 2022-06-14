@@ -964,7 +964,7 @@ def visualize_EN(delay, date_idx, date_clu, y_pred_t,
               std_Y_clu, std_Y_per, name_clu, 
               color_clu, figname, idx_plot_clu):
 
-    fig, ax = plt.subplots(len(idx_plot_clu),
+    fig, ax = plt.subplots(len(idx_plot_clu)+1,
                            figsize=(10, 60))  
     idx = date_idx
 
@@ -1044,8 +1044,59 @@ def visualize_EN(delay, date_idx, date_clu, y_pred_t,
                         interpolate=True, alpha=.5,
                         label='Uncertainty')
         ax[i].legend(loc=4, fontsize='xx-small')
-        if i != len(idx_plot_clu)-1:
-            ax[i].get_xaxis().set_visible(False)
+        # if i != len(idx_plot_clu)-1:
+        ax[i].get_xaxis().set_visible(False)
+
+    ax[-1].plot(date_clu, y_real_t[idx], 
+                        'r.-', label='Observation')
+    ax[-1].plot(date_clu, 
+            y_pred_t[-1, idx].squeeze(), 
+            'k.-', 
+            label='Final')
+    ax[-1].fill_between(date_clu, 
+                y_pred_t[-1, idx].squeeze()-std_Y_clu[-1, idx], 
+                y_pred_t[-1, idx].squeeze()+std_Y_clu[-1, idx], 
+                interpolate=True, alpha=.5,
+                label='Uncertainty')
+    ax[-1].legend(loc=4, fontsize='xx-small')
+    ax[-1].set_ylabel('Dst(nT)')
+    ax[-1].set_title('Final')
+    
+    plt.xticks(rotation='vertical')
+    fig.savefig(figname, dpi=300)
+
+
+def visualize_final(delay, date_idx, date_clu, 
+              y_t_truth, y_real_t, y_pred_t_save,
+              std_test_final, name_clu,  
+              color_clu, figname, idx_plot_clu):
+
+    fig, ax = plt.subplots(figsize=(15, 20))  
+    idx = date_idx
+
+    print('start date: {}'.format(date_clu[0]))
+    print('end date: {}'.format(date_clu[-1]))
+
+    ax.plot(date_clu, y_real_t[idx], 
+                        'r.-', label='Observation')
+    ax.plot(date_clu, 
+            y_t_truth[idx].squeeze(), 
+            'k.-', 
+            label='Final')
+    ax.plot(date_clu, 
+            y_pred_t_save[idx].squeeze(), 
+            'g.-', 
+            label='GRU')
+    # st()
+    ax.fill_between(date_clu, 
+                y_t_truth[idx].squeeze()-std_test_final[idx]*3, 
+                y_t_truth[idx].squeeze()+std_test_final[idx]*3, 
+                interpolate=True, alpha=.5,
+                label='Uncertainty')
+    ax.legend(loc=4, fontsize='xx-small')
+    ax.set_ylabel('Dst(nT)')
+    ax.set_xlabel('Date')
+    ax.set_title('delay:'+str(delay)+'h')
     plt.xticks(rotation='vertical')
     fig.savefig(figname, dpi=300)
 
@@ -1295,7 +1346,7 @@ def train_std_GRU_boost(X, X_t, y, y_real, y_t, y_real_t,\
 
     # X = (X-min_X)/(max_X-min_X)
     # X_t = (X_t-min_X)/(max_X-min_X)
-    beta, CRPS_min, RS_min = est_beta(X_t, y_t, y_real_t)
+    beta, CRPS_min, RS_min = est_beta(X_t, y, y_real)
     # st()
 
     ################# design the model ###################
