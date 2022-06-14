@@ -356,7 +356,7 @@ Y_t = Y_test
 y_Per = stretch(Dst_Per, ratio=ratio, thres=Dst_sel)
 y_Per_t = Dst_Per_t
 
-if (storm_idx[0] == 27) & (real_flag==0):
+if (storm_idx[0] == 32) & (real_flag==0):
     date_idx = np.arange(264, 360)
 else:
     date_idx = np.arange(6, Y_t.shape[0]-6)
