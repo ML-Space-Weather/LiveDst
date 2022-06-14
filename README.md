@@ -1,6 +1,6 @@
 # Geomagnetic Storm Forecasting
 
-Notebooks for a project with aim of predicting the Disturbance Storm-Time (Dst) 1-6 hours ahead using Gated Recurrent Units (GRU), Accurate abd Reliable Uncertainty Estimate (ACCRUE), and Kalman Filter (Linear combination) methods.
+Notebooks for a project with aim of predicting the Disturbance Storm-Time (Dst) 1-6 hours ahead using Gated Recurrent Units (GRU), Accurate abd Reliable Uncertainty Estimate (ACCRUE), and developed ensemble boost methods.
 
 If you have any questions w.r.t the code, please contact andong.hu@colorado.edu or huan.winter@gmail.com.
 
@@ -14,17 +14,11 @@ To be able to run the notebooks themselves, it is most convenient to use the sup
 
 Data can be downloaded from scratch using the script 'Omni_dataset_generator.py' or the data saved folder 'Data'. 'main.py' is an End-to-End pipeline of, 1) using the downloaded data and GRU method to develope a Dst model; 2) using ACCRUE method and the developed Dst model to develop a dDst (i.e., uncertainty of Dst) model; and 3) assimilate dDst model into Dst model to further improve the performance of the model. 
 
-The notebooks are used to display the outputs.
-
-### Notebooks
-- [End-to-end pipeline](Main.ipynb) : This notebook features an end-to-end pipeline from download the Omni data and Dst from heliopy, model Dst & dDst, and eventually assimilate dDst into Dst model. This model achieves state of the art results in multiple hour ahead forecasting of Dst, which has been a primary focus of the community.
-
-
 ### Python modules
 
 The following files contain useful functions and classes used throughout the notebooks.
 
-- [End-to-end pipeline](Main.py) : Same as Main.ipynb, just in python.
+- [End-to-end pipeline](Main_boost_multi.py) : an end-to-end pipeline from ACE data and Dst to model Dst & dDst, and eventually assimilate dDst into Dst model. This model achieves state of the art results in multiple hour ahead forecasting of Dst, which has been a primary focus of the community.
 - [Functions](funs.py) : Various functions ranging from model training to plotting.
 - [networks](nets.py) : arritectures used for training.
 - [real-data download](ACE_dataset_generator.py) : Download the original measurements from ACE or DSCOVER in the same format with Data/Omni_data.pkl.
@@ -65,9 +59,9 @@ Inside file,
 
 Their size is always (number of samples, ).
 
-- [Dst model's coefficients](Data/params_new_1_-100.pt) : The name of data is 'Data/params_new_(delay)--(Dst_sel)-(idx_storm)-.pt'. 
+- [Dst model's coefficients](Data/params_new_1_-100-32-0resi_std.pt) : The name of data is 'Data/params_new_(delay)--(Dst_sel)-(idx_storm)-(boost_number)(criteria).pt'. 
 
-- [dDst model's coefficients](Data/params_std_1_-100-27.pt) : The name of data is 'Data/params_new_(delay)_(Dst_sel)-(idx_storm)-(target).pt'. Where the 'target' is either 'gru' or 'per' means either dDst of either GRU model or persistence model predictions.
+- [dDst model's coefficients](Data/params_std_1_-100-32-1gruresi_std.pt) : The name of data is 'Data/params_new_(delay)_(Dst_sel)-(idx_storm)-(boost_num)(target)(criteria).pt'. Where the 'target' is either 'gru' or 'per' means either dDst of either GRU model or persistence model predictions; 'boost_num' is between 0-10 here (max can be changed); criteria is 'resi_std'.
 
 
 # Tutorial
@@ -92,16 +86,6 @@ The data has been downloaded and saved in Data/Omni_data.pkl (in case no Interne
 
 ## end-to-end python scripts
 
-    python3 main.py -delay 1 -storm_idx 27 -model GRU -pred_flag -ratio 1.1 -smooth_width 3 -iter_flag -pred_plot -std_method MLP -device 7 -QQplot -boost_num 5 -Dst_flag -std_flag -DA_method Linear
+    python3 main_boost_multi.py -boost_num 10 -DA_num 10 -boost_method linear -criteria resi_std -model GRU -Omni_data Data/all_19990101-20170501.pkl -ratio 1.0 -train_per 5.0 -smooth_width 3 -DA_method Linear -Dst_sel -100 -std_method GRU -device 3 -storm_idx 32 -iter_flag -pred_plot -removal -final_plot -var_idx 0 1 2 3 4 5 6 -delay 6
 
 set -device >=10 to use cpu.
-
-## implement boost technique
-
-    python3 main_boost.py -storm_idx 27 -model GRU -ratio 1.0 -smooth_width 0 -iter_flag -pred_plot -std_method GRU -device 1 -QQplot -DA_method Linear -delay 3 -boost_num 5
-
-### try K-fold 
-
-    python3 try_storm_boost.py -model GRU -ratio 1.0 -smooth_width 0 -iter_flag -std_method GRU -device 2 -DA_method Linear -boost_num 1 -length_max 60 -delay_max 6 -QQplot -pred_plot -Dst_flag -std_flag
-
-The results figure can be found as 'Figs/predict_UQ2_'+delay+'--'+Dst_sel+'-'+storm_index+'.jpg'
