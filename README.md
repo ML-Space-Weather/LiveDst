@@ -29,6 +29,8 @@ Data are organized by files containing different datasets organized roughly by s
 
 - [Original data set](Data/Omni_data.pkl) : All measurements included in the OMNI low-res dataset without flags and uncertainties, together with Dst from Kyoto. Gaps of 72 hours or less have been filled via linear interpolation. This dataset contains all OMNI low res data with no-data values replaced by np.nans.
 
+- [Original data set](Data/all_19990101-20170501.pkl) : All ACE measurements without flags and uncertainties. Gaps of 72 hours or less have been filled via linear interpolation. This dataset contains all OMNI low res data with no-data values replaced by np.nans.
+
 - [ML-ready data set](Data/data_1_-100.h5) : The name of data is 'Data/data_(delay)_(Dst_sel).h5'. 
 
 Inside file, 
@@ -38,13 +40,12 @@ Inside file,
 1: IMF electron velocity(V)
 2: IMF B_norm(i.e., sqrt(Bx^2+By^2+Bz^2))
 3: IMF Bz
-4: F10.7 one day ago
-5: dipole tilt angle:
+4: dipole tilt angle:
 t_year = 23.4*np.cos((DOY-172)*2*pi/365.25)
 t_day = 11.2*np.cos((UTC-16.72)*2*pi/24)
 t = t_year+t_day
-6: sin of clock angle: sin(arctan(IMF By, IMF Bz))
-7: Dst
+5: sin of clock angle: sin(arctan(IMF By, IMF Bz))
+6: Dst
 
 'Y_DL_(idx_storm)': target (Dst(t+delay)) set for storm (idx_storm) whose size is (number of samples, width of window, 1). 
 
@@ -82,7 +83,13 @@ Then activate LiveDst by
 
     python3 Omni_dataset_generator.py -t0 2000 1 1 -t1 2022 1 1 -filename Data/Omni_data.pkl
 
-The data has been downloaded and saved in Data/Omni_data.pkl (in case no Internet)
+The data has been downloaded and saved in Data/Omni_data.pkl (in case no Internet). 
+
+## Omni data download
+
+    python3 ACE_dataset_generator.py -t0 2000 1 1 -t1 2017 5 1 
+
+The data has been downloaded and saved in Data/all_19990101-20170501.pkl. This is not functional due to the new LASP download restriction.  
 
 ## end-to-end python scripts
 
