@@ -23,6 +23,7 @@ from scipy.stats import pearsonr
 
 # visualize
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import scipy.stats as stats
 import pylab 
 
@@ -52,6 +53,7 @@ from nets import my_callbacks, seed_torch, maxmin_scale, std_scale
 from tqdm import tqdm
 from progressist import ProgressBar as Bar_ori
 from ipdb import set_trace as st
+
 
 def get_free_gpu():
     gpu_stats = subprocess.check_output(["nvidia-smi", "--format=csv", "--query-gpu=memory.used,memory.free"])
@@ -186,12 +188,16 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
     By = np.array(Omni_data['BY_GSM'])
     Bz = np.array(Omni_data['BZ_GSM'])
     F107 = np.array(Omni_data['F10_INDEX'])
-    F107 = shift(F107, 24, cval=0)
+    # F107 = shift(F107, 24, cval=0)
     # Dst = np.array(Omni_data['DST'])
     Dst = smooth(np.array(Omni_data['DST']), width)
     # Dst = stretch(Dst, ratio=ratio, width=Dst_sel)
     B_norm = np.sqrt(Bx**2+By**2)
     # B_norm = np.sqrt(Bx**2+By**2+Bz**2)
+
+    if delay == 0:
+        Dst_real = Dst
+        Dst = shift(Dst, 1, cval=0)
     
     ################# SH variables ###################
 
@@ -206,6 +212,8 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
     t = t_year+t_day
     theta_c = np.arctan2(By, Bz)
     # st()
+    # print('max of t_year/day is {} {}'.format(t_year.max(), t_day.max()))
+    # st()
     SH_vari = np.vstack([
                         #  np.sqrt(F107),
                          t,
@@ -218,6 +226,7 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
     error = np.sqrt(np.nanmean((Y_Per - Dst)**2))
     # print('RMSE of all persistence model:{}'.format(error))
 
+        
     ################## NN ##############################
     X_NN = np.zeros([Dst.shape[0]-6-delay, 12])
     Y_NN = np.zeros(Dst.shape[0]-6-delay)
@@ -249,8 +258,12 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
     for i in tqdm(np.arange(5, Dst.shape[0]-delay-1)):
 
         X_DL[i-6] = X0[i-5:i+1]
-        Y_DL[i-6] = np.expand_dims(Dst[i-5+delay:i+delay+1],
+        if delay == 0:
+            Y_DL[i-6] = np.expand_dims(Dst_real[i-5+delay:i+delay+1],
                                     axis=1)
+        else:
+            Y_DL[i-6] = np.expand_dims(Dst[i-5+delay:i+delay+1],
+                                        axis=1)
         Y_Per[i-6] = Dst[i]
         date_DL[i-6] = date_clu[i+delay+1]
     
@@ -291,7 +304,7 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
     #             Y_NN[peak_idx], 'mx', 
     #             # label='Dst index',
     #             markersize=12)
-    ax.set_xlim(date_peak[0], date_peak[-1])
+    # ax.set_xlim(date_peak[0]-100, date_peak[-1]+100)
     ax.set_xlabel('Date')
     ax.set_ylabel('Dst (nT)')
     ax.legend()
@@ -312,6 +325,8 @@ def storm_sel_omni(Omni_data, delay, Dst_sel, width):
                 idx_clu[i, 1] = int(np.where(Y_NN[peaks[idx_t]:] >= 0)[0][0]+24+peaks[idx_t])
             except:
                 idx_clu[i, 1] = Y_NN.shape[0]
+            if idx_clu[i, 1] > Y_NN.shape[0]:
+                idx_clu[i, 1] = Y_NN.shape[0]-1
                 
             print('{} & {} & {} & {}'.format(i, 
                                              Omni_date[int(idx_clu[i, 0])],
@@ -813,7 +828,7 @@ def QQ_plot_clu(y_real_t, y_t_clu, std_Yt_clu,
                 figname):
 
     r = np.zeros([y_t_clu.shape[0], 3])
-    fig, ax = plt.subplots(y_t_clu.shape[0], 3, figsize=(20, 60))
+    fig, ax = plt.subplots(y_t_clu.shape[0], 3, figsize=(40, 60))
 
     y_train = y_real[valid_idx:]
     y_valid = y_real[:valid_idx]
@@ -834,7 +849,7 @@ def QQ_plot_clu(y_real_t, y_t_clu, std_Yt_clu,
         ax[idx, 0].plot(sort_F, y)
         ax[idx, 0].plot(y, y)
 
-        ax[idx, 0].set_ylabel(str(idx)+':CDF(F)')
+        ax[idx, 0].set_ylabel('model_'+str(idx)+':CDF(F)')
         ax[idx, 0].set_xlabel('')
         ax[idx, 0].set_title('')
 
@@ -855,7 +870,8 @@ def QQ_plot_clu(y_real_t, y_t_clu, std_Yt_clu,
         y = np.arange(len(sort_F))/float(len(sort_F))
         ax[idx, 1].plot(sort_F, y)
         ax[idx, 1].plot(y, y)
-        ax[idx, 1].set_ylabel(str(idx)+':CDF(F)')
+        ax[idx, 1].set_ylabel('')
+        # ax[idx, 1].set_ylabel(str(idx)+':CDF(F)')
         ax[idx, 1].set_xlabel('')
         ax[idx, 1].set_title('')
 
@@ -964,7 +980,7 @@ def visualize_EN(delay, date_idx, date_clu, y_pred_t,
               std_Y_clu, std_Y_per, name_clu, 
               color_clu, figname, idx_plot_clu):
 
-    fig, ax = plt.subplots(len(idx_plot_clu),
+    fig, ax = plt.subplots(len(idx_plot_clu)+1,
                            figsize=(10, 60))  
     idx = date_idx
 
@@ -1044,8 +1060,63 @@ def visualize_EN(delay, date_idx, date_clu, y_pred_t,
                         interpolate=True, alpha=.5,
                         label='Uncertainty')
         ax[i].legend(loc=4, fontsize='xx-small')
-        if i != len(idx_plot_clu)-1:
-            ax[i].get_xaxis().set_visible(False)
+        # if i != len(idx_plot_clu)-1:
+        ax[i].get_xaxis().set_visible(False)
+
+    ax[-1].plot(date_clu, y_real_t[idx], 
+                        'r.-', label='Observation')
+    ax[-1].plot(date_clu, 
+            y_pred_t[-1, idx].squeeze(), 
+            'k.-', 
+            label='Final')
+    ax[-1].fill_between(date_clu, 
+                y_pred_t[-1, idx].squeeze()-std_Y_clu[-1, idx], 
+                y_pred_t[-1, idx].squeeze()+std_Y_clu[-1, idx], 
+                interpolate=True, alpha=.5,
+                label='Uncertainty')
+    ax[-1].legend(loc=4, fontsize='xx-small')
+    ax[-1].set_ylabel('Dst(nT)')
+    ax[-1].set_title('Final')
+    
+    plt.xticks(rotation='vertical')
+    fig.savefig(figname, dpi=300)
+
+
+def visualize_final(delay, date_idx, date_clu, 
+              y_t_truth, y_real_t, y_pred_t_save,
+              std_test_final, name_clu,  
+              color_clu, figname, idx_plot_clu):
+
+    fig, ax = plt.subplots(figsize=(15, 20))  
+    idx = date_idx
+
+    print('start date: {}'.format(date_clu[0]))
+    print('end date: {}'.format(date_clu[-1]))
+
+    ax.plot(date_clu, y_real_t[idx], 
+                        'r.-', label='Observation')
+    ax.plot(date_clu, 
+            y_t_truth[idx].squeeze(), 
+            'k.-', 
+            label='Final')
+    ax.plot(date_clu, 
+            y_pred_t_save[idx].squeeze(), 
+            'g.-', 
+            label='GRU')
+    # st()
+    i = np.where(y_t_truth[idx]<-100)[0]
+    std_test_final[idx[i]] *= 3
+    ax.fill_between(date_clu, 
+                y_t_truth[idx].squeeze()-std_test_final[idx], 
+                y_t_truth[idx].squeeze()+std_test_final[idx], 
+                interpolate=True, alpha=.5,
+                label='Uncertainty')
+    ax.legend(loc=4, fontsize='xx-small')
+    ax.set_ylabel('Dst(nT)')
+    ax.set_xlabel('Date')
+    ax.set_title('delay:'+str(delay)+'h')
+    myFmt = mdates.DateFormatter('%Y-%m-%d')
+    ax.xaxis.set_major_formatter(myFmt)
     plt.xticks(rotation='vertical')
     fig.savefig(figname, dpi=300)
 
@@ -1094,7 +1165,7 @@ def train_Dst_boost(X, Y, X_t, delay, Dst_sel, ratio,
     n_iters = 10
     hidden_size = 32
     output_size = 1
-    input_size = X.shape[2]
+    input_size = X.shape[-1]
 
     mean_Y = np.mean(Y)
     Y_std = np.std(Y)
@@ -1105,8 +1176,11 @@ def train_Dst_boost(X, Y, X_t, delay, Dst_sel, ratio,
     Y = (Y - mean_Y)/Y_std
     # Y_t = (Y_t - mean_Y)/Y_std
 
-    mean_X = np.mean(X.reshape(-1, X.shape[2]), axis=0)
-    std_X = np.std(X.reshape(-1, X.shape[2]), axis=0)
+    mean_X = np.mean(X.reshape(-1, X.shape[-1]), axis=0)
+    std_X = np.std(X.reshape(-1, X.shape[-1]), axis=0)
+
+    # print('mean/std of X: {} {}'.format(mean_X, std_X))
+    # print('mean/std of Y: {} {}'.format(mean_Y, Y_std))
     
     X = (X - mean_X)/std_X
     X_t = (X_t - mean_X)/std_X
@@ -1156,6 +1230,7 @@ def train_Dst_boost(X, Y, X_t, delay, Dst_sel, ratio,
         net_regr.load_params(f_params=callname)        
 
     y_pred_t = net_regr.predict(X_t)#.reshape(-1, 1)
+    # st()
     y_pred_t = y_pred_t*Y_std+mean_Y
 
     return y_pred_t
@@ -1295,7 +1370,7 @@ def train_std_GRU_boost(X, X_t, y, y_real, y_t, y_real_t,\
 
     # X = (X-min_X)/(max_X-min_X)
     # X_t = (X_t-min_X)/(max_X-min_X)
-    beta, CRPS_min, RS_min = est_beta(X_t, y_t, y_real_t)
+    beta, CRPS_min, RS_min = est_beta(X_t, y, y_real)
     # st()
 
     ################# design the model ###################

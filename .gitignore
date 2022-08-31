@@ -17,9 +17,10 @@ Res/10/*
 __pycache__/
 *.h5
 *.jpg
-# ./*.pt
+./*.pt
 history.json
 download.ipynb
 test.ipynb
 zenodo/
 .vscode/
+*.pt

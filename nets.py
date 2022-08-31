@@ -709,6 +709,9 @@ class PhysinformedNet_AR(NeuralNetRegressor):
         N = d.shape[0]
         sigma = torch.exp(y_pred).squeeze().to(self.device)
         
+        weights = 0.3 - 0.7*y_true[:, 1]/400
+        weights = weights.to(self.device)
+        
         x = torch.zeros(sigma.shape[0])
         CRPS = torch.zeros(sigma.shape[0])
         RS = torch.zeros(sigma.shape[0])
@@ -755,7 +758,7 @@ class PhysinformedNet_AR(NeuralNetRegressor):
         # 1-beta = CRPS_min/(RS_min+CRPS_min)
         # loss = self.beta*CRPS+(1-self.beta)*RS
         loss = CRPS/self.CRPS_min+RS/self.RS_min
-        loss = torch.mean(loss)
+        loss = torch.mean(loss*weights)
                 
         return loss
 
@@ -781,6 +784,9 @@ class PhysinformedNet_AR_2D(NeuralNetRegressor):
         d = y_true[:, :, 1] - y_true[:, :, 0]
         d = d.to(self.device)
 
+        weights = 0.3 - 0.7*y_true[:, :, 1]/400
+        weights = weights.to(self.device)
+
         N = d.shape[0]
         sigma = torch.exp(y_pred).squeeze().to(self.device)
         
@@ -804,6 +810,7 @@ class PhysinformedNet_AR_2D(NeuralNetRegressor):
             CRPS_3 = CRPS_3.to(self.device)
             # st()
             CRPS = sigma[:, idx]*(CRPS_1 + CRPS_2 - CRPS_3)
+            CRPS = weights[:, idx]*CRPS
 
             # import ipdb;ipdb.set_trace()
             RS = N*(x_t/N*(erf(x_t)+1) - 
@@ -811,6 +818,7 @@ class PhysinformedNet_AR_2D(NeuralNetRegressor):
                 torch.exp(-x_t**2)/np.sqrt(np.pi)/N)
         
             RS = RS.to(self.device)
+            RS = weights[:, idx]*RS
             # st()
             loss += torch.mean(CRPS/self.CRPS_min+RS/self.RS_min)
               

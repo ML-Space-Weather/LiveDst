@@ -90,18 +90,20 @@ Then activate LiveDst by
 
 The data has been downloaded and saved in Data/Omni_data.pkl (in case no Internet)
 
-## end-to-end python scripts
+# Synthetic Dst Generation
 
-    python3 main.py -delay 1 -storm_idx 27 -model GRU -pred_flag -ratio 1.1 -smooth_width 3 -iter_flag -pred_plot -std_method MLP -device 7 -QQplot -boost_num 5 -Dst_flag -std_flag -DA_method Linear
+It should be noted that the data name needs to be updated according to where you saved the data. 
 
-set -device >=10 to use cpu.
+## Data preprocess (in matlab)
+    mat2hdf5
 
-## implement boost technique
+## Main function
 
-    python3 main_boost.py -storm_idx 27 -model GRU -ratio 1.0 -smooth_width 0 -iter_flag -pred_plot -std_method GRU -device 1 -QQplot -DA_method Linear -delay 3 -boost_num 5
+### Generate single event
 
-### try K-fold 
+    python3 main_syn.py -delay 0 -var_idx 0 1 2 3 4 5 6 -ratio 1.0 -boost_num 5 -storm_idx 32 -device 6 -syn_num 2 -boost_method linear
 
-    python3 try_storm_boost.py -model GRU -ratio 1.0 -smooth_width 0 -iter_flag -std_method GRU -device 2 -DA_method Linear -boost_num 1 -length_max 60 -delay_max 6 -QQplot -pred_plot -Dst_flag -std_flag
+### Generate multi events
 
-The results figure can be found as 'Figs/predict_UQ2_'+delay+'--'+Dst_sel+'-'+storm_index+'.jpg'
+    python3 try_syn.py -delay 0 -device 1 -boost_num 5 -ratio 1.0
+
