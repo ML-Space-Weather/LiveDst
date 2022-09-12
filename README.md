@@ -101,7 +101,7 @@ It should be noted that the data name needs to be updated according to where you
 
 ### Generate single event
 
-    python3 main_syn.py -delay 0 -var_idx 0 1 2 3 4 5 6 -ratio 1.0 -boost_num 5 -storm_idx 32 -device 6 -syn_num 2 -boost_method linear
+    python3 main_syn_batch.py -delay 0 -var_idx 0 1 2 3 4 5 6 -ratio 1.0 -boost_num 5 -storm_idx 32 -device 6 -syn_num 2 -boost_method linear
 
 ### Generate multi events
 
