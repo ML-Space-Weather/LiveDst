@@ -28,8 +28,8 @@ import sklearn
 from sklearn.metrics import make_scorer
 from scipy.ndimage import shift
 
-from funs_Syn import train_Dst_boost, train_std_GRU_boost
-from funs_Syn import train_std_boost
+from funs_Syn import train_Dst_boost, train_std_boost, train_std_GRU_boost
+from funs_Syn import train_Dst_boost_batch, train_std_boost_batch, train_std_GRU_boost_batch
 
 
 from ipdb import set_trace as st
@@ -293,116 +293,91 @@ res_clu = []
 std_clu = []
 X_syn_t = np.array(X_syn)
 
-# for i in tqdm(range(6, 24*2)):
-for i in tqdm(range(6, X_syn.shape[1])):
+y_clu = []
+std_clu = []
 
-    y_clu = []
-    std_clu = []
+# std_Y_per = train_std_boost_batch(
+#                 X_syn_t[:, :, var_idx], 
+#                 delay, Dst_sel, 
+#                 ratio, 0, boost_num, storm_idx[0], 
+#                 device, 
+#                 pred='per', 
+#                 criteria=criteria,
+#                 # train=std_model,
+#                 win_size=6
+#                 )
 
-    std_Y_per = train_std_boost(
-                    X_train[:, -1, var_idx], 
-                    X_syn_t[:, i, var_idx], 
-                    X_syn_t[:, i, -1], 
-                    X_syn_t[:, i, -1], 
-                    delay, Dst_sel, 
-                    ratio, 0, boost_num, storm_idx[0], 
+# st()
+# y_clu = np.expand_dims(np.tile(X_syn_t[:, i, -1], (X_syn_t.shape[1]-5, 1)).T, axis=0)
+# std_clu = np.expand_dims(std_Y_per, axis=0)
+
+# st()
+
+for iter_boost in range(boost_num):
+
+    pred = train_Dst_boost_batch( 
+                    X_syn_t[:, :, var_idx], 
+                    delay, Dst_sel, ratio, 
+                    iter_boost, boost_num, 
+                    # 1, 2,   
+                    storm_idx[0], 
                     device, 
-                    pred='per', 
-                    criteria=criteria,
-                    # train=std_model,
-                    train=False
-                    )
+                    criteria, 
+                    win_size=6)
 
-    y_clu = np.expand_dims(X_syn_t[:, i, -1], 0)
-    std_clu = np.expand_dims(std_Y_per, 0)
+    # st()
+    X_syn_t[:, 5:, -1] = pred[:, :, -1]
 
-    st()
-    
-    for iter_boost in range(boost_num):
-
-        # st()
-
-        pred = train_Dst_boost(X_train[:, :, var_idx], 
-                        X_train[:, :, -1], 
-                        X_syn_t[:, i-6:i, var_idx], 
-                        delay, Dst_sel, ratio, 
-                        iter_boost, boost_num, 
-                        # 1, 2,   
-                        storm_idx[0], 
-                        device, 
-                        criteria, 
-                        False)
-
-        pred = train_Dst_boost(X_train[:, :, var_idx], 
-                        X_train[:, :, -1], 
-                        X_syn_t[:, i-6:i, var_idx], 
-                        delay, Dst_sel, ratio, 
-                        iter_boost, boost_num, 
-                        # 1, 2,   
-                        storm_idx[0], 
-                        device, 
-                        criteria, 
-                        False)
-        # st()
-
-        std = train_std_GRU_boost(X_train[:, :, var_idx], 
-                                X_syn_t[:, :, var_idx], 
-                                pred, X_syn_t[:, i-6:i, -1], 
-                                pred, X_syn_t[:, i-6:i, -1], 
-                                delay, 
-                                Dst_sel, 
-                                ratio, iter_boost, 
-                                boost_num, 
-                                storm_idx[0], 
-                                device, 
-                                pred='gru', 
-                                criteria=criteria, 
-                                # train=std_model, 
-                                train=False
-                                )
-        # st()
-        # if iter_boost == 0:
-        #     y_clu = np.expand_dims(pred[:, -1].squeeze(), 0)
-        #     std_clu = np.expand_dims(std, 0)
-        # else:
+    std = train_std_GRU_boost_batch( 
+                            X_syn_t[:, :, var_idx], 
+                            delay, 
+                            Dst_sel, 
+                            ratio, iter_boost, 
+                            boost_num, 
+                            storm_idx[0], 
+                            device, 
+                            pred='gru', 
+                            criteria=criteria, 
+                            # train=std_model, 
+                            win_size=6
+                            )
+    # st()
+    if iter_boost == 0:
+        y_clu = np.expand_dims(pred[:, :, -1].squeeze(), 0)
+        std_clu = np.expand_dims(std, 0)
+    else:
         y_clu = np.vstack([y_clu, 
-                        np.expand_dims(pred[:, -1].squeeze(), 0)])
+                        np.expand_dims(pred[:, :, -1].squeeze(), 0)])
         std_clu = np.vstack([std_clu, 
                                 np.expand_dims(std, 0)])
 
+st()
+sigma_clu = 1/((std_clu+1e-3)**2)
+
+# y_clu = y_clu[:, :, :-1]
+# sigma_clu = sigma_clu[:, :, :-1]
+
+if boost_method == 'linear':
+    y_t = sigma_clu*y_clu.squeeze()
+    for i in range(y_t.shape[0]):
+        y_t[i] = y_t[i]/sigma_clu.sum(axis=0)
+    pred_final = y_t.sum(axis=0)
+elif boost_method == 'max':
     # st()
-    sigma_clu = 1/(std_clu**2)
-
-    if boost_method == 'linear':
-        y_t = sigma_clu*y_clu.squeeze()/sigma_clu.sum(axis=0)
-        pred_final = y_t.sum(axis=0)
-    elif boost_method == 'max':
-        # st()
-        arg = np.argmax(sigma_clu, axis=0)
-        pred_final = np.zeros(sigma_clu.shape[1])
-        for j in range(arg.shape[0]):
-            pred_final[j] = y_clu[arg[j], j]
-    else:
-        pred_final = y_clu[0]
-    X_syn_t[:, i, -1] = pred_final
-    # X_syn_t[:, i, -1] = pred_final
-    
-    res_clu.append(pred_final)
-
-res = np.zeros([res_clu[0].shape[0], len(res_clu)])
-for i in range(res.shape[1]):
-    res[:, i] = res_clu[i]
-
-print(res.shape)
-
-y_real = shift(X_real[0, :, -1], 1, cval=0)
-y_syn = np.tile(y_real, (10000, 1))
+    arg = np.argmax(sigma_clu, axis=0)
+    pred_final = np.zeros(sigma_clu.shape[1])
+    for j in range(arg.shape[0]):
+        pred_final[j] = y_clu[arg[j], j]
+else:
+    pred_final = y_clu[0]
+X_syn_t[:, 5:, -1] = pred_final
+# X_syn_t[:, i, -1] = pred_final
 
 ############################## save and plot ###################
 
 # y_syn[:,idx_sel+1:] = res[2:]
 # sio.savemat(filename_save, {"y_syn":y_syn})
-sio.savemat(filename_save, {"X_syn":X_syn_t[1:]})
+sio.savemat(filename_save, {"X_syn":X_syn_t[:-1]})
 
 # fig, axs = plt.subplots(X_syn_t.shape[2], 1, figsize=(16, 32))
 # for idx, ax in enumerate(axs):
