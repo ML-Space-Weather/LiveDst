@@ -94,12 +94,12 @@ os.environ["CUDA_VISIBLE_DEVICES"]=str(args.device)
 filename_load = '/media/faraday/andong/SW_synthetic/preprocess/'+\
     'SW_Storm_'+\
     str(syn_num)+\
-    '_sb_10.mat'
+    '_sb_10_new.mat'
 
 filename_save = '/media/faraday/andong/SW_synthetic/Res/'+\
     'SW_Storm_'+\
     str(syn_num)+\
-    '_sb_10.mat'
+    '_sb_10_new.mat'
 
 names = ['N',
          'V',
@@ -351,7 +351,7 @@ for iter_boost in range(boost_num):
         std_clu = np.vstack([std_clu, 
                                 np.expand_dims(std, 0)])
 
-st()
+# st()
 sigma_clu = 1/((std_clu+1e-3)**2)
 
 # y_clu = y_clu[:, :, :-1]
@@ -373,28 +373,29 @@ else:
 X_syn_t[:, 5:, -1] = pred_final
 # X_syn_t[:, i, -1] = pred_final
 
+# st()
 ############################## save and plot ###################
 
 # y_syn[:,idx_sel+1:] = res[2:]
 # sio.savemat(filename_save, {"y_syn":y_syn})
-sio.savemat(filename_save, {"X_syn":X_syn_t[:-1]})
+sio.savemat(filename_save, {"X_syn":X_syn_t[2:, 6:]})
 
-# fig, axs = plt.subplots(X_syn_t.shape[2], 1, figsize=(16, 32))
-# for idx, ax in enumerate(axs):
-#     for i in range(10):
-#         if i == 0:
-#             ax.plot(X_syn_t[i*100, :, idx], 'o-', label='real')
-#         else:
-#             ax.plot(X_syn_t[i*100, :, idx], '-', label='syn_'+str(i))
-#     ax.set_ylabel(names[idx])
-#     ax.legend()
+fig, axs = plt.subplots(X_syn_t.shape[2], 1, figsize=(16, 32))
+for idx, ax in enumerate(axs):
+    for i in range(10):
+        if i == 0:
+            ax.plot(X_syn_t[i*100, 6:, idx], 'o-', label='real')
+        else:
+            ax.plot(X_syn_t[i*100, 6:, idx], '-', label='syn_'+str(i))
+    ax.set_ylabel(names[idx])
+    ax.legend()
 
-# # ax.plot(date_plot[1:42], y_real[idx_sel+1:idx_sel+42], 'o-',label='real')
+# ax.plot(date_plot[1:42], y_real[idx_sel+1:idx_sel+42], 'o-',label='real')
 
-# # for i in range(10):
-# #     ax.plot(date_plot[1:42], y_syn[i*100, idx_sel+1:idx_sel+42], label='syn'+str(i+1))
-#     # ax.plot(date_plot[1:42], y_syn[i*100, idx_sel+1:idx_sel+42], label='syn'+str(i+1))
-# # plt.legend()
-# ax.set_xlabel('Date')
-# # ax.set_ylabel('Dst (nT)')
-# plt.savefig('Figs/syn1.png')
+# for i in range(10):
+#     ax.plot(date_plot[1:42], y_syn[i*100, idx_sel+1:idx_sel+42], label='syn'+str(i+1))
+    # ax.plot(date_plot[1:42], y_syn[i*100, idx_sel+1:idx_sel+42], label='syn'+str(i+1))
+# plt.legend()
+ax.set_xlabel('Date')
+# ax.set_ylabel('Dst (nT)')
+plt.savefig('Figs/syn1.png')
