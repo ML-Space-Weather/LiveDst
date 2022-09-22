@@ -94,12 +94,12 @@ os.environ["CUDA_VISIBLE_DEVICES"]=str(args.device)
 filename_load = '/media/faraday/andong/SW_synthetic/preprocess/'+\
     'SW_Storm_'+\
     str(syn_num)+\
-    '_sb_10_new.mat'
+    '_sb_10.mat'
 
 filename_save = '/media/faraday/andong/SW_synthetic/Res/'+\
     'SW_Storm_'+\
     str(syn_num)+\
-    '_sb_10_new.mat'
+    '_sb_10.mat'
 
 names = ['N',
          'V',
